@@ -16,6 +16,6 @@ gem "rubocop-rails-omakase", require: false
 # gem "debug", ">= 1.0.0"
 
 group :test do
-  gem "minitest", "~> 5.0"
+  gem "minitest", "~> 6.0"
   gem "factory_bot_rails"
 end
