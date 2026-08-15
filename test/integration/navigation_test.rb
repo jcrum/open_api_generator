@@ -14,7 +14,7 @@ class NavigationTest < ActionDispatch::IntegrationTest
   end
 
   test "serves OpenAPI JSON for widgets" do
-    get "/doc/open_api.json"
+    get "/doc/spec.json"
 
     assert_response :success
 

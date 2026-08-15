@@ -3,7 +3,7 @@
 module OpenApiGenerator
   # Controller that serves the OpenAPI specification.
   #
-  # Mounted at /open_api.json and /open_api.yaml by default.
+  # Mounted at /spec.json and /spec.yaml by default.
   class OpenApiController < ActionController::Base
     # Renders the OpenAPI spec as JSON.
     #
