@@ -3,6 +3,6 @@ Rails.application.routes.draw do
 
   namespace :api do
     resources :widgets, only: [:index, :show]
-    resources :gadgets, only: [:index]
+    resources :gadgets, only: [:index, :create]
   end
 end

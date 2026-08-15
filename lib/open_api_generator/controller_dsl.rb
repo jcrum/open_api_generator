@@ -29,10 +29,30 @@ module OpenApiGenerator
       base.class_attribute :open_api_generator_tag, default: nil
       base.class_attribute :open_api_generator_action_docs, default: {}
       base.class_attribute :open_api_generator_ignored_actions, default: Set.new
+      base.class_attribute :open_api_generator_input_specs, default: {}
+
+      base.class_eval do
+        def permitted(action = action_name)
+          spec = self.class.open_api_generator_input_specs[action.to_s]
+          raise ArgumentError, "no api_params declared for #{self.class}##{action}" unless spec
+
+          spec.permit(params)
+        end
+      end
     end
 
     # Class methods added to controllers when ControllerDSL is included.
     module ClassMethods
+      def api_params(action, permit:, wrapped_in: nil, model: nil)
+        spec = OpenApiGenerator::InputSpec.new(
+          action: action,
+          permit: permit,
+          wrapped_in: wrapped_in,
+          model: model
+        )
+        self.open_api_generator_input_specs = open_api_generator_input_specs.merge(action.to_s => spec)
+      end
+
       # Marks this controller to be included in the OpenAPI spec.
       #
       # By default, only ActionController::API controllers are included.

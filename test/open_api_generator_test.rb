@@ -113,6 +113,62 @@ class OpenApiGeneratorModelSchemaTest < ActiveSupport::TestCase
     assert_equal({ type: "object" }, schema[:properties]["info"])
     assert_equal({ type: "string", enum: %w[draft published] }, schema[:properties]["status"])
   end
+
+  test "supports writable, except, required, and array options" do
+    model = Class.new(DummyModel) do
+      def self.name
+        "WritableModel"
+      end
+
+      def self.columns_hash
+        super.merge(
+          "id" => Column.new(:integer, false),
+          "items_count" => Column.new(:integer, false),
+          "updated_at" => Column.new(:datetime, false)
+        )
+      end
+    end
+
+    schema = OpenApiGenerator::ModelSchema.schema_for(
+      model,
+      writable: true,
+      except: [:info],
+      required: [:name],
+      arrays: [:name]
+    )
+
+    assert_equal %w[name], schema[:required]
+    assert_equal({ type: "array", items: { type: "string" } }, schema[:properties]["name"])
+    refute schema[:properties].key?("id")
+    refute schema[:properties].key?("items_count")
+    refute schema[:properties].key?("updated_at")
+    refute schema[:properties].key?("info")
+  end
+end
+
+class OpenApiGeneratorInputSpecTest < ActiveSupport::TestCase
+  test "parses required and array fields into params and schema" do
+    spec = OpenApiGenerator::InputSpec.new(
+      action: :create,
+      permit: { title: :string!, tags: [:string] }
+    )
+    params = ActionController::Parameters.new(title: "Hello", tags: ["one"], ignored: "no")
+
+    assert_equal({ title: "Hello", tags: ["one"] }, spec.permit(params))
+    assert_equal({ type: "string" }, spec.schema[:properties]["title"])
+    assert_equal({ type: "array", items: { type: "string" } }, spec.schema[:properties]["tags"])
+    assert_equal ["title"], spec.schema[:required]
+  end
+
+  test "uses model enum values in input schemas" do
+    spec = OpenApiGenerator::InputSpec.new(
+      action: :create,
+      model: OpenApiGeneratorModelSchemaTest::DummyModel,
+      permit: { status: :string }
+    )
+
+    assert_equal %w[draft published], spec.schema[:properties]["status"][:enum]
+  end
 end
 
 class OpenApiGeneratorSpecBuilderTest < ActiveSupport::TestCase
@@ -168,6 +224,35 @@ class OpenApiGeneratorSpecBuilderTest < ActiveSupport::TestCase
     end
 
     assert_equal [], spec[:paths]["/api/widgets"]["get"][:security]
+  end
+
+  test "registers api_params schemas and request body references" do
+    route = OpenApiGenerator::RouteDiscovery::RouteInfo.new("POST", "/api/gadgets", "api/gadgets", "create")
+    config = OpenApiGenerator::Configuration.new
+    config.ignored_paths = []
+    config.included_base_controllers = ["Api::AuthenticatedBaseController"]
+
+    spec = OpenApiGenerator::RouteDiscovery.stub(:call, [route]) do
+      OpenApiGenerator::SpecBuilder.call(config: config)
+    end
+
+    request_body = spec[:paths]["/api/gadgets"]["post"][:requestBody]
+    assert_equal({ "$ref" => "#/components/schemas/GadgetCreateRequest" }, request_body[:content]["application/json"][:schema])
+    assert_equal true, request_body[:required]
+    assert_equal({ type: "array", items: { type: "string" } }, spec[:components][:schemas]["GadgetCreateRequest"][:properties]["label_ids"])
+  end
+
+  test "permitted filters wrapped input params" do
+    controller = Api::GadgetsController.new
+    controller.params = ActionController::Parameters.new(
+      gadget: { title: "Hello", description: "Details", label_ids: ["a"], ignored: "no" },
+      ignored: "no"
+    )
+
+    assert_equal(
+      { title: "Hello", description: "Details", label_ids: ["a"] },
+      controller.permitted(:create)
+    )
   end
 
   test "returns controller metadata for route introspection" do

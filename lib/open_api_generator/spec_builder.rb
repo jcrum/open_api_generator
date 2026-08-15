@@ -15,6 +15,7 @@ module OpenApiGenerator
     # @return [Hash] a complete OpenAPI 3.0 specification
     def self.call(config:)
       routes = RouteDiscovery.call(config: config)
+      registry = SchemaRegistry.new
 
       paths = {}
       routes.each do |route|
@@ -28,7 +29,7 @@ module OpenApiGenerator
         verb = route.verb.downcase
 
         paths[oas_path] ||= {}
-        paths[oas_path][verb] = build_operation(config, controller_class, route.action, oas_path)
+        paths[oas_path][verb] = build_operation(config, controller_class, route.action, oas_path, registry)
       end
 
       spec = {
@@ -36,7 +37,7 @@ module OpenApiGenerator
         info: build_info(config),
         servers: config.servers,
         paths: paths,
-        components: { schemas: {} }
+        components: { schemas: registry.to_h }
       }
       spec[:components][:securitySchemes] = config.security_schemes if config.security_schemes.present?
       spec[:security] = config.security if config.security.present?
@@ -112,7 +113,7 @@ module OpenApiGenerator
     # @param action [String] the action name
     # @param oas_path [String] the OpenAPI-formatted path
     # @return [Hash] an OpenAPI operation object
-    def self.build_operation(config, controller_class, action, oas_path)
+    def self.build_operation(config, controller_class, action, oas_path, registry = SchemaRegistry.new)
       docs = get_action_docs(controller_class, action)
 
       operation = {
@@ -124,7 +125,8 @@ module OpenApiGenerator
 
       operation[:summary] = docs[:summary] if docs[:summary]
       operation[:description] = docs[:description] if docs[:description]
-      operation[:requestBody] = docs[:requestBody] if docs[:requestBody]
+      request_body = RequestBodyBuilder.build(controller_class, action, docs, registry)
+      operation[:requestBody] = request_body if request_body
       operation[:security] = docs[:security] if docs.key?(:security)
 
       operation
