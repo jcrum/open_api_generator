@@ -49,6 +49,29 @@ module OpenApiGenerator
       build_route_introspection(routes, config)
     end
 
+    # Returns the discovered operations and whether each write operation has a
+    # request body declaration. This is intentionally separate from the final
+    # OpenAPI document so completeness checks can run without duplicating route
+    # filtering logic.
+    def self.discover_operations(config)
+      RouteDiscovery.call(config: config).filter_map do |route|
+        controller_class = constantize_controller(route.controller)
+        next unless controller_class
+        next if config.ignored_controllers.include?(controller_class.name)
+        next unless include_controller?(controller_class, config)
+        next if ignore_action?(controller_class, route.action)
+
+        docs = get_action_docs(controller_class, route.action)
+        {
+          controller: controller_class.name,
+          action: route.action,
+          verb: route.verb,
+          path: convert_path_to_open_api(route.path),
+          has_request_body: request_body_declared?(controller_class, route.action, docs)
+        }
+      end
+    end
+
     # Converts a controller path string to a controller class.
     #
     # @param controller_path [String] the controller path (e.g., "api/users")
@@ -217,6 +240,12 @@ module OpenApiGenerator
       return {} unless controller_class.respond_to?(:open_api_generator_action_docs)
 
       controller_class.open_api_generator_action_docs.fetch(action.to_s, {})
+    end
+
+    def self.request_body_declared?(controller_class, action, docs)
+      return true if docs.key?(:requestBody) && !docs[:requestBody].nil?
+
+      RequestBodyBuilder.input_spec(controller_class, action).present?
     end
 
     # Builds the tags array for an operation.

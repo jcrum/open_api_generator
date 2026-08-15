@@ -291,6 +291,25 @@ class OpenApiGeneratorSpecBuilderTest < ActiveSupport::TestCase
     assert_equal({ type: "array", items: { type: "string" } }, spec[:components][:schemas]["GadgetCreateRequest"][:properties]["label_ids"])
   end
 
+  test "audits write operations without request body declarations" do
+    routes = [
+      OpenApiGenerator::RouteDiscovery::RouteInfo.new("POST", "/api/widgets", "api/widgets", "create"),
+      OpenApiGenerator::RouteDiscovery::RouteInfo.new("POST", "/api/gadgets", "api/gadgets", "create")
+    ]
+    config = OpenApiGenerator::Configuration.new
+    config.ignored_paths = []
+    config.included_base_controllers = ["Api::AuthenticatedBaseController"]
+
+    offenses = OpenApiGenerator::RouteDiscovery.stub(:call, routes) do
+      OpenApiGenerator::Completeness.audit(config: config)
+    end
+
+    assert_equal 1, offenses.size
+    assert_equal "POST", offenses.first.verb
+    assert_equal "/api/widgets", offenses.first.path
+    assert_equal "Api::WidgetsController", offenses.first.controller
+  end
+
   test "permitted filters wrapped input params" do
     controller = Api::GadgetsController.new
     controller.params = ActionController::Parameters.new(
