@@ -242,7 +242,10 @@ class OpenApiGeneratorSpecBuilderTest < ActiveSupport::TestCase
     assert_equal true, operation["x-idempotent"]
     assert_equal "gadgets", operation["x-write_scope"]
     assert_equal({ "$ref" => "#/components/schemas/Gadget" }, operation[:responses]["201"][:content]["application/json"][:schema])
-    assert_equal({ type: "object", properties: {} }, spec[:components][:schemas]["Gadget"])
+    gadget_schema = spec[:components][:schemas]["Gadget"]
+    assert_equal "object", gadget_schema[:type]
+    assert_equal({ type: "string" }, gadget_schema[:properties]["title"])
+    assert_includes gadget_schema[:required], "title"
   end
 
   test "uses serializer schemas before model schemas" do
