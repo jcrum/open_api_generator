@@ -8,6 +8,7 @@ require "open_api_generator/type_mapper"
 require "open_api_generator/input_spec"
 require "open_api_generator/schema_registry"
 require "open_api_generator/request_body_builder"
+require "open_api_generator/response_builder"
 require "open_api_generator/model_schema"
 require "open_api_generator/spec_builder"
 

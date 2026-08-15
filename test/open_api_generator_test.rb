@@ -226,6 +226,52 @@ class OpenApiGeneratorSpecBuilderTest < ActiveSupport::TestCase
     assert_equal [], spec[:paths]["/api/widgets"]["get"][:security]
   end
 
+  test "builds response schemas and MCP operation metadata" do
+    route = OpenApiGenerator::RouteDiscovery::RouteInfo.new("POST", "/api/gadgets", "api/gadgets", "create")
+    config = OpenApiGenerator::Configuration.new
+    config.ignored_paths = []
+    config.included_base_controllers = ["Api::AuthenticatedBaseController"]
+
+    spec = OpenApiGenerator::RouteDiscovery.stub(:call, [route]) do
+      OpenApiGenerator::SpecBuilder.call(config: config)
+    end
+
+    operation = spec[:paths]["/api/gadgets"]["post"]
+    assert_equal "create_gadget", operation[:operationId]
+    assert_equal "add_gadget", operation["x-tool-name"]
+    assert_equal true, operation["x-idempotent"]
+    assert_equal "gadgets", operation["x-write_scope"]
+    assert_equal({ "$ref" => "#/components/schemas/Gadget" }, operation[:responses]["201"][:content]["application/json"][:schema])
+    assert_equal({ type: "object", properties: {} }, spec[:components][:schemas]["Gadget"])
+  end
+
+  test "uses serializer schemas before model schemas" do
+    serializer = Class.new do
+      def self.name
+        "GadgetSerializer"
+      end
+
+      def self.open_api_schema
+        { type: "string", format: "uri" }
+      end
+    end
+    controller = Class.new(ActionController::API)
+    controller.include OpenApiGenerator::ControllerDSL
+    controller.api_response :show, serializer: serializer
+    registry = OpenApiGenerator::SchemaRegistry.new
+
+    responses = OpenApiGenerator::ResponseBuilder.build(
+      OpenApiGenerator::Configuration.new,
+      controller,
+      :show,
+      {},
+      registry
+    )
+
+    assert_equal({ "$ref" => "#/components/schemas/Gadget" }, responses["200"][:content]["application/json"][:schema])
+    assert_equal({ type: "string", format: "uri" }, registry.to_h["Gadget"])
+  end
+
   test "registers api_params schemas and request body references" do
     route = OpenApiGenerator::RouteDiscovery::RouteInfo.new("POST", "/api/gadgets", "api/gadgets", "create")
     config = OpenApiGenerator::Configuration.new

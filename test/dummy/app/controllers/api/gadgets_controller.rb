@@ -7,6 +7,11 @@ module Api
       description: :string,
       label_ids: [:string]
     }
+    api_response :create, status: 201, model: Gadget
+    swagger :create,
+      operation_id: "create_gadget",
+      tool_name: "add_gadget",
+      extensions: { idempotent: true, write_scope: "gadgets" }
 
     def create
       render json: permitted(:create)

@@ -118,9 +118,9 @@ module OpenApiGenerator
 
       operation = {
         tags: build_tags(controller_class, docs),
-        operationId: "#{controller_class.name}##{action}",
+        operationId: docs[:operation_id] || "#{controller_class.name}##{action}",
         parameters: build_parameters(oas_path, docs),
-        responses: build_responses(config, docs)
+        responses: ResponseBuilder.build(config, controller_class, action, docs, registry)
       }
 
       operation[:summary] = docs[:summary] if docs[:summary]
@@ -128,6 +128,11 @@ module OpenApiGenerator
       request_body = RequestBodyBuilder.build(controller_class, action, docs, registry)
       operation[:requestBody] = request_body if request_body
       operation[:security] = docs[:security] if docs.key?(:security)
+      operation["x-tool-name"] = docs[:tool_name] if docs[:tool_name]
+      docs[:extensions]&.each do |key, value|
+        extension = key.to_s.start_with?("x-") ? key.to_s : "x-#{key}"
+        operation[extension] = value
+      end
 
       operation
     end
