@@ -123,7 +123,7 @@ module OpenApiGenerator
       #     responses: {
       #       "201" => { description: "User created" }
       #     }
-      def swagger(action_name, summary: nil, description: nil, tags: nil, parameters: nil, request_body: nil, responses: nil)
+      def swagger(action_name, summary: nil, description: nil, tags: nil, parameters: nil, request_body: nil, responses: nil, security: nil)
         action = action_name.to_s
         doc = {
           summary: summary,
@@ -133,6 +133,7 @@ module OpenApiGenerator
           requestBody: request_body,
           responses: responses
         }.compact
+        doc[:security] = security unless security.nil?
 
         self.open_api_generator_action_docs = open_api_generator_action_docs.merge(action => doc)
       end

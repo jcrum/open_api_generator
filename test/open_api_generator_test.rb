@@ -17,6 +17,9 @@ class OpenApiGeneratorConfigurationTest < ActiveSupport::TestCase
     assert_equal "1.0.0", config.version
     assert_nil config.description
     assert_equal [{ url: "/" }], config.servers
+    assert_equal({}, config.security_schemes)
+    assert_nil config.security
+    assert_equal [], config.included_base_controllers
     assert config.cache_enabled
     assert_equal "open_api_generator/open_api", config.cache_key
     assert_equal 10.minutes, config.cache_ttl
@@ -38,6 +41,15 @@ class OpenApiGeneratorControllerDSLTest < ActiveSupport::TestCase
     assert_equal "Samples", controller.open_api_generator_tag
     assert_equal "List items", controller.open_api_generator_action_docs["index"][:summary]
     assert_includes controller.open_api_generator_ignored_actions, "secret"
+  end
+
+  test "preserves an explicit empty security requirement" do
+    controller = Class.new(ActionController::API)
+    controller.include OpenApiGenerator::ControllerDSL
+
+    controller.swagger :login, security: []
+
+    assert_equal [], controller.open_api_generator_action_docs["login"][:security]
   end
 end
 
@@ -113,6 +125,8 @@ class OpenApiGeneratorSpecBuilderTest < ActiveSupport::TestCase
     config.ignored_controllers = []
     config.cache_enabled = false
     config.servers = [{ url: "/api" }]
+    config.security_schemes = { bearerAuth: { type: "http", scheme: "bearer" } }
+    config.security = [{ bearerAuth: [] }]
 
     spec = OpenApiGenerator::RouteDiscovery.stub(:call, [route]) do
       OpenApiGenerator::SpecBuilder.call(config: config)
@@ -122,10 +136,38 @@ class OpenApiGeneratorSpecBuilderTest < ActiveSupport::TestCase
     assert_equal "Dummy API", spec[:info][:title]
     assert_equal "2.0.0", spec[:info][:version]
     assert_equal [{ url: "/api" }], spec[:servers]
+    assert_equal({ bearerAuth: { type: "http", scheme: "bearer" } }, spec[:components][:securitySchemes])
+    assert_equal [{ bearerAuth: [] }], spec[:security]
     assert_equal "Fetch a widget", operation[:summary]
     assert_equal ["Widgets"], operation[:tags]
     assert_equal "Api::WidgetsController#show", operation[:operationId]
     assert_equal "id", operation[:parameters].first[:name]
+  end
+
+  test "includes descendants of configured base controllers" do
+    route = OpenApiGenerator::RouteDiscovery::RouteInfo.new("GET", "/api/gadgets", "api/gadgets", "index")
+    config = OpenApiGenerator::Configuration.new
+    config.ignored_paths = []
+    config.included_base_controllers = ["Api::AuthenticatedBaseController"]
+
+    spec = OpenApiGenerator::RouteDiscovery.stub(:call, [route]) do
+      OpenApiGenerator::SpecBuilder.call(config: config)
+    end
+
+    assert spec[:paths].key?("/api/gadgets")
+  end
+
+  test "emits an action security override" do
+    route = OpenApiGenerator::RouteDiscovery::RouteInfo.new("GET", "/api/widgets", "api/widgets", "index")
+    config = OpenApiGenerator::Configuration.new
+    config.ignored_paths = []
+    config.security = [{ bearerAuth: [] }]
+
+    spec = OpenApiGenerator::RouteDiscovery.stub(:call, [route]) do
+      OpenApiGenerator::SpecBuilder.call(config: config)
+    end
+
+    assert_equal [], spec[:paths]["/api/widgets"]["get"][:security]
   end
 
   test "returns controller metadata for route introspection" do

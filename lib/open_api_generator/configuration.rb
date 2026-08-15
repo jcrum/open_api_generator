@@ -28,6 +28,15 @@ module OpenApiGenerator
     # @return [Array<String>] array of controller class names to ignore
     attr_accessor :ignored_controllers
 
+    # @return [Hash] OpenAPI security scheme definitions
+    attr_accessor :security_schemes
+
+    # @return [Array<Hash>, nil] top-level OpenAPI security requirements
+    attr_accessor :security
+
+    # @return [Array<String>] base controller names whose descendants are included
+    attr_accessor :included_base_controllers
+
     # @return [Boolean] whether to cache the generated spec
     attr_accessor :cache_enabled
 
@@ -48,6 +57,9 @@ module OpenApiGenerator
       @servers = [{ url: "/" }]
       @ignored_paths = [%r{^/rails}]
       @ignored_controllers = []
+      @security_schemes = {}
+      @security = nil
+      @included_base_controllers = []
       @cache_enabled = !Rails.env.development?
       @cache_key = "open_api_generator/open_api"
       @cache_ttl = 10.minutes

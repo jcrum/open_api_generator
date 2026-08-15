@@ -21,7 +21,7 @@ module OpenApiGenerator
         controller_class = constantize_controller(route.controller)
         next unless controller_class
         next if config.ignored_controllers.include?(controller_class.name)
-        next unless include_controller?(controller_class)
+        next unless include_controller?(controller_class, config)
         next if ignore_action?(controller_class, route.action)
 
         oas_path = convert_path_to_open_api(route.path)
@@ -31,13 +31,16 @@ module OpenApiGenerator
         paths[oas_path][verb] = build_operation(config, controller_class, route.action, oas_path)
       end
 
-      {
+      spec = {
         open_api: "3.0.3",
         info: build_info(config),
         servers: config.servers,
         paths: paths,
         components: { schemas: {} }
       }
+      spec[:components][:securitySchemes] = config.security_schemes if config.security_schemes.present?
+      spec[:security] = config.security if config.security.present?
+      spec
     end
 
     def self.route_introspection(config:)
@@ -59,14 +62,23 @@ module OpenApiGenerator
     #
     # @param controller_class [Class] the controller class
     # @return [Boolean] true if the controller should be included
-    def self.include_controller?(controller_class)
+    def self.include_controller?(controller_class, config)
       return false unless controller_class.respond_to?(:open_api_generator_json_mode)
 
       mode = controller_class.open_api_generator_json_mode
       return true if mode == :json
       return false if mode == :ignore
 
-      controller_class < ActionController::API
+      included_by_ancestor?(controller_class, config) || controller_class < ActionController::API
+    end
+
+    def self.included_by_ancestor?(controller_class, config)
+      bases = config.included_base_controllers
+      return false if bases.blank?
+
+      controller_class.ancestors.any? do |ancestor|
+        ancestor.is_a?(Class) && bases.include?(ancestor.name)
+      end
     end
 
     # Determines if an action should be excluded from the spec.
@@ -113,6 +125,7 @@ module OpenApiGenerator
       operation[:summary] = docs[:summary] if docs[:summary]
       operation[:description] = docs[:description] if docs[:description]
       operation[:requestBody] = docs[:requestBody] if docs[:requestBody]
+      operation[:security] = docs[:security] if docs.key?(:security)
 
       operation
     end
@@ -122,7 +135,7 @@ module OpenApiGenerator
         controller_class = constantize_controller(route.controller)
         next unless controller_class
         next if config.ignored_controllers.include?(controller_class.name)
-        next unless include_controller?(controller_class)
+        next unless include_controller?(controller_class, config)
         next if ignore_action?(controller_class, route.action)
 
         oas_path = convert_path_to_open_api(route.path)
