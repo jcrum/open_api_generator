@@ -2,9 +2,17 @@
 
 module OpenApiGenerator
   class InputSpec
-    Field = Struct.new(:name, :type, :array, :required, keyword_init: true) do
+    Field = Struct.new(:name, :type, :array, :required, :children, :array_children, keyword_init: true) do
       def array?
         array
+      end
+
+      def object?
+        children.present?
+      end
+
+      def array_object?
+        array? && array_children.present?
       end
     end
 
@@ -19,9 +27,7 @@ module OpenApiGenerator
 
     def permit(params)
       source = wrapped_in ? (params[wrapped_in] || params) : params
-      scalars = fields.reject(&:array?).map { |field| field.name.to_sym }
-      arrays = fields.select(&:array?).each_with_object({}) { |field, result| result[field.name.to_sym] = [] }
-      source.permit(*scalars, arrays).to_h.symbolize_keys
+      source.permit(*permit_filters(fields)).to_h.deep_symbolize_keys
     end
 
     def schema
@@ -29,7 +35,11 @@ module OpenApiGenerator
       required = []
 
       fields.each do |field|
-        properties[field.name] = if field.array?
+        properties[field.name] = if field.array_object?
+          { type: "array", items: { type: "object", properties: schema_properties(field.array_children) } }
+        elsif field.object?
+          { type: "object", properties: schema_properties(field.children) }
+        elsif field.array?
           TypeMapper.array(field.type)
         else
           column_or_scalar(field)
@@ -50,12 +60,59 @@ module OpenApiGenerator
     private
 
     def parse(name, token)
-      if token.is_a?(Array)
-        inner = token.first.to_s
-        Field.new(name: name.to_s, type: inner.chomp("!").to_sym, array: true, required: inner.end_with?("!"))
+      if token.is_a?(Hash)
+        Field.new(
+          name: name.to_s,
+          type: :object,
+          array: false,
+          required: false,
+          children: token.map { |child_name, child_token| parse(child_name, child_token) },
+          array_children: nil
+        )
+      elsif token.is_a?(Array)
+        inner = token.first
+        if inner.is_a?(Array) && inner.length == 1 && inner.first.is_a?(Hash)
+          children = inner.first
+          Field.new(name: name.to_s, type: :object, array: true, required: false, children: nil,
+            array_children: children.map { |child_name, child_token| parse(child_name, child_token) })
+        elsif inner.is_a?(Hash)
+          Field.new(name: name.to_s, type: :object, array: true, required: false, children: nil,
+            array_children: inner.map { |child_name, child_token| parse(child_name, child_token) })
+        else
+          value = inner.to_s
+          Field.new(name: name.to_s, type: value.chomp("!").to_sym, array: true, required: value.end_with?("!"), children: nil, array_children: nil)
+        end
       else
         value = token.to_s
-        Field.new(name: name.to_s, type: value.chomp("!").to_sym, array: false, required: value.end_with?("!"))
+        Field.new(name: name.to_s, type: value.chomp("!").to_sym, array: false, required: value.end_with?("!"), children: nil, array_children: nil)
+      end
+    end
+
+    def permit_filters(list)
+      list.map do |field|
+        if field.array_object?
+          { field.name.to_sym => permit_filters(field.array_children) }
+        elsif field.object?
+          { field.name.to_sym => permit_filters(field.children) }
+        elsif field.array?
+          { field.name.to_sym => [] }
+        else
+          field.name.to_sym
+        end
+      end
+    end
+
+    def schema_properties(list)
+      list.each_with_object({}) do |field, properties|
+        properties[field.name] = if field.array_object?
+          { type: "array", items: { type: "object", properties: schema_properties(field.array_children) } }
+        elsif field.object?
+          { type: "object", properties: schema_properties(field.children) }
+        elsif field.array?
+          TypeMapper.array(field.type)
+        else
+          column_or_scalar(field)
+        end
       end
     end
 

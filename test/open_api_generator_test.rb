@@ -169,6 +169,28 @@ class OpenApiGeneratorInputSpecTest < ActiveSupport::TestCase
 
     assert_equal %w[draft published], spec.schema[:properties]["status"][:enum]
   end
+
+  test "permits and documents nested objects and arrays of objects" do
+    spec = OpenApiGenerator::InputSpec.new(
+      action: :create,
+      permit: {
+        detail: { note: :string, purposes: [:string] },
+        targets: [[ target_id: :uuid!, role: :string ]]
+      }
+    )
+    params = ActionController::Parameters.new(
+      detail: { note: "note", purposes: ["food"], ignored: "no" },
+      targets: [{ target_id: "1", role: "subject", ignored: "no" }]
+    )
+
+    assert_equal(
+      { detail: { note: "note", purposes: ["food"] }, targets: [{ target_id: "1", role: "subject" }] },
+      spec.permit(params)
+    )
+    assert_equal "object", spec.schema[:properties]["detail"][:type]
+    assert_equal "array", spec.schema[:properties]["targets"][:type]
+    assert_equal "object", spec.schema[:properties]["targets"][:items][:type]
+  end
 end
 
 class OpenApiGeneratorSpecBuilderTest < ActiveSupport::TestCase
