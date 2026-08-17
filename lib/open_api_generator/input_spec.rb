@@ -52,8 +52,14 @@ module OpenApiGenerator
       result
     end
 
-    def schema_name
-      base = model ? model.name.demodulize : action.classify
+    def schema_name(controller_class: nil)
+      base = if model
+        model.name.to_s.gsub("::", "")
+      elsif controller_class
+        controller_class.name.to_s.gsub("::", "")
+      else
+        action.classify
+      end
       "#{base}#{action.classify}Request"
     end
 

@@ -37,7 +37,7 @@ module OpenApiGenerator
     def self.schema_name(response)
       source = response[:model] || response[:serializer]
       name = source.respond_to?(:name) ? source.name : nil
-      name = name.to_s.demodulize.sub(/Serializer$/, "")
+      name = name.to_s.gsub("::", "").sub(/Serializer$/, "")
       name = "Response" if name.empty?
       name
     end

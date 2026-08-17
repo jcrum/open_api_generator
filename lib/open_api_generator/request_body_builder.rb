@@ -8,7 +8,7 @@ module OpenApiGenerator
       spec = input_spec(controller_class, action)
       return unless spec
 
-      reference = registry.register(spec.schema_name, spec.schema)
+      reference = registry.register(spec.schema_name(controller_class: controller_class), spec.schema)
       {
         required: spec.fields.any?(&:required),
         content: { "application/json" => { schema: reference } }
