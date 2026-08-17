@@ -23,6 +23,8 @@ module OpenApiGenerator
     #
     # @return [void]
     def routes
+      return head :not_found unless Rails.env.development?
+
       render json: route_introspection
     end
 

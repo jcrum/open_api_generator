@@ -56,7 +56,7 @@ module OpenApiGenerator
       base = if model
         model.name.to_s.gsub("::", "")
       elsif controller_class
-        controller_class.name.to_s.gsub("::", "")
+        controller_class.name.to_s.split("::").last.to_s.sub(/Controller\z/, "")
       else
         action.classify
       end

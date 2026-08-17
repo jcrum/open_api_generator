@@ -218,7 +218,7 @@ class OpenApiGeneratorSpecBuilderTest < ActiveSupport::TestCase
     assert_equal [{ bearerAuth: [] }], spec[:security]
     assert_equal "Fetch a widget", operation[:summary]
     assert_equal ["Widgets"], operation[:tags]
-    assert_equal "Api::WidgetsController#show", operation[:operationId]
+    assert_equal "get_widget", operation[:operationId]
     assert_equal "id", operation[:parameters].first[:name]
   end
 

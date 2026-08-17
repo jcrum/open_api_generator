@@ -29,7 +29,7 @@ module OpenApiGenerator
         verb = route.verb.downcase
 
         paths[oas_path] ||= {}
-        paths[oas_path][verb] = build_operation(config, controller_class, route.action, oas_path, registry)
+        paths[oas_path][verb] = build_operation(config, controller_class, route.action, oas_path, registry, verb)
       end
 
       spec = {
@@ -136,12 +136,12 @@ module OpenApiGenerator
     # @param action [String] the action name
     # @param oas_path [String] the OpenAPI-formatted path
     # @return [Hash] an OpenAPI operation object
-    def self.build_operation(config, controller_class, action, oas_path, registry = SchemaRegistry.new)
+    def self.build_operation(config, controller_class, action, oas_path, registry = SchemaRegistry.new, verb = nil)
       docs = get_action_docs(controller_class, action)
 
       operation = {
         tags: build_tags(controller_class, docs),
-        operationId: docs[:operation_id] || "#{controller_class.name}##{action}",
+        operationId: docs[:operation_id] || default_operation_id(controller_class, action, oas_path, verb),
         parameters: build_parameters(oas_path, docs),
         responses: ResponseBuilder.build(config, controller_class, action, docs, registry)
       }
@@ -268,13 +268,54 @@ module OpenApiGenerator
     # @param controller_class [Class] the controller class
     # @return [String] the generated tag name
     # @example
-    #   generate_tag_from_controller(Api::UsersController) # => "Api Users"
+    #   generate_tag_from_controller(Api::UsersController) # => "Users"
     def self.generate_tag_from_controller(controller_class)
-      controller_class.name
+      controller_resource_name(controller_class).titleize
+    end
+
+    # Generates a stable, framework-independent operation identity.
+    #
+    # REST actions use conventional verbs (`list_widgets`, `get_widget`,
+    # `create_widget`, etc.). Custom actions retain their action name and use
+    # the controller resource as the suffix (`archive_card`).
+    def self.default_operation_id(controller_class, action, oas_path = nil, verb = nil)
+      resource = controller_resource_name(controller_class)
+      singular_resource = resource.singularize
+      prefix = {
+        "index" => "list",
+        "show" => "get",
+        "create" => "create",
+        "update" => "update",
+        "destroy" => "delete"
+      }[action.to_s]
+
+      prefix = "replace" if action.to_s == "update" && verb.to_s.casecmp("put").zero?
+
+      operation_id = if prefix
+        "#{prefix}_#{action.to_s == "index" ? resource : singular_resource}"
+      else
+        "#{action}_#{singular_resource}"
+      end
+
+      context = route_context(oas_path, resource)
+      context ? "#{operation_id}_by_#{context.singularize}" : operation_id
+    end
+
+    def self.route_context(oas_path, resource)
+      return if oas_path.blank?
+
+      segments = oas_path.split("/").reject(&:blank?)
+      static_segments = segments.reject { |segment| segment.start_with?("{") }
+      resource_index = static_segments.rindex(resource)
+      return unless resource_index
+
+      static_segments[0...resource_index].reject { |segment| %w[api v1].include?(segment) }.last
+    end
+
+    def self.controller_resource_name(controller_class)
+      controller_class.name.to_s.split("::").last
         .sub(/Controller$/, "")
         .underscore
-        .tr("/", " ")
-        .titleize
     end
 
     # Builds the parameters array for an operation.
