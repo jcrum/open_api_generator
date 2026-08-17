@@ -7,6 +7,7 @@ module Api
 
     swagger :index,
       summary: "List widgets",
+      security: [],
       parameters: [
         {
           name: "page",

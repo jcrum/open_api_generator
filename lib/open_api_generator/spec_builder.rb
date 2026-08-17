@@ -15,34 +15,61 @@ module OpenApiGenerator
     # @return [Hash] a complete OpenAPI 3.0 specification
     def self.call(config:)
       routes = RouteDiscovery.call(config: config)
+      registry = SchemaRegistry.new
 
       paths = {}
       routes.each do |route|
         controller_class = constantize_controller(route.controller)
         next unless controller_class
         next if config.ignored_controllers.include?(controller_class.name)
-        next unless include_controller?(controller_class)
+        next unless include_controller?(controller_class, config)
         next if ignore_action?(controller_class, route.action)
 
         oas_path = convert_path_to_open_api(route.path)
         verb = route.verb.downcase
 
         paths[oas_path] ||= {}
-        paths[oas_path][verb] = build_operation(config, controller_class, route.action, oas_path)
+        paths[oas_path][verb] = build_operation(config, controller_class, route.action, oas_path, registry)
       end
 
-      {
+      spec = {
         open_api: "3.0.3",
         info: build_info(config),
         servers: config.servers,
         paths: paths,
-        components: { schemas: {} }
+        components: { schemas: registry.to_h }
       }
+      spec[:components][:securitySchemes] = config.security_schemes if config.security_schemes.present?
+      spec[:security] = config.security if config.security.present?
+      spec
     end
 
     def self.route_introspection(config:)
       routes = RouteDiscovery.call(config: config)
       build_route_introspection(routes, config)
+    end
+
+    # Returns the discovered operations and whether each write operation has a
+    # request body declaration. This is intentionally separate from the final
+    # OpenAPI document so completeness checks can run without duplicating route
+    # filtering logic.
+    def self.discover_operations(config)
+      RouteDiscovery.call(config: config).filter_map do |route|
+        controller_class = constantize_controller(route.controller)
+        next unless controller_class
+        next if config.ignored_controllers.include?(controller_class.name)
+        next unless include_controller?(controller_class, config)
+        next if ignore_action?(controller_class, route.action)
+
+        docs = get_action_docs(controller_class, route.action)
+        {
+          controller: controller_class.name,
+          action: route.action,
+          verb: route.verb,
+          path: convert_path_to_open_api(route.path),
+          has_request_body: request_body_declared?(controller_class, route.action, docs)
+        }
+      end
     end
 
     # Converts a controller path string to a controller class.
@@ -59,14 +86,23 @@ module OpenApiGenerator
     #
     # @param controller_class [Class] the controller class
     # @return [Boolean] true if the controller should be included
-    def self.include_controller?(controller_class)
+    def self.include_controller?(controller_class, config)
       return false unless controller_class.respond_to?(:open_api_generator_json_mode)
 
       mode = controller_class.open_api_generator_json_mode
       return true if mode == :json
       return false if mode == :ignore
 
-      controller_class < ActionController::API
+      included_by_ancestor?(controller_class, config) || controller_class < ActionController::API
+    end
+
+    def self.included_by_ancestor?(controller_class, config)
+      bases = config.included_base_controllers
+      return false if bases.blank?
+
+      controller_class.ancestors.any? do |ancestor|
+        ancestor.is_a?(Class) && bases.include?(ancestor.name)
+      end
     end
 
     # Determines if an action should be excluded from the spec.
@@ -100,19 +136,26 @@ module OpenApiGenerator
     # @param action [String] the action name
     # @param oas_path [String] the OpenAPI-formatted path
     # @return [Hash] an OpenAPI operation object
-    def self.build_operation(config, controller_class, action, oas_path)
+    def self.build_operation(config, controller_class, action, oas_path, registry = SchemaRegistry.new)
       docs = get_action_docs(controller_class, action)
 
       operation = {
         tags: build_tags(controller_class, docs),
-        operationId: "#{controller_class.name}##{action}",
+        operationId: docs[:operation_id] || "#{controller_class.name}##{action}",
         parameters: build_parameters(oas_path, docs),
-        responses: build_responses(config, docs)
+        responses: ResponseBuilder.build(config, controller_class, action, docs, registry)
       }
 
       operation[:summary] = docs[:summary] if docs[:summary]
       operation[:description] = docs[:description] if docs[:description]
-      operation[:requestBody] = docs[:requestBody] if docs[:requestBody]
+      request_body = RequestBodyBuilder.build(controller_class, action, docs, registry)
+      operation[:requestBody] = request_body if request_body
+      operation[:security] = docs[:security] if docs.key?(:security)
+      operation["x-tool-name"] = docs[:tool_name] if docs[:tool_name]
+      docs[:extensions]&.each do |key, value|
+        extension = key.to_s.start_with?("x-") ? key.to_s : "x-#{key}"
+        operation[extension] = value
+      end
 
       operation
     end
@@ -122,7 +165,7 @@ module OpenApiGenerator
         controller_class = constantize_controller(route.controller)
         next unless controller_class
         next if config.ignored_controllers.include?(controller_class.name)
-        next unless include_controller?(controller_class)
+        next unless include_controller?(controller_class, config)
         next if ignore_action?(controller_class, route.action)
 
         oas_path = convert_path_to_open_api(route.path)
@@ -197,6 +240,12 @@ module OpenApiGenerator
       return {} unless controller_class.respond_to?(:open_api_generator_action_docs)
 
       controller_class.open_api_generator_action_docs.fetch(action.to_s, {})
+    end
+
+    def self.request_body_declared?(controller_class, action, docs)
+      return true if docs.key?(:requestBody) && !docs[:requestBody].nil?
+
+      RequestBodyBuilder.input_spec(controller_class, action).present?
     end
 
     # Builds the tags array for an operation.

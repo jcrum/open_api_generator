@@ -29,10 +29,42 @@ module OpenApiGenerator
       base.class_attribute :open_api_generator_tag, default: nil
       base.class_attribute :open_api_generator_action_docs, default: {}
       base.class_attribute :open_api_generator_ignored_actions, default: Set.new
+      base.class_attribute :open_api_generator_input_specs, default: {}
+      base.class_attribute :open_api_generator_response_specs, default: {}
+
+      base.class_eval do
+        def permitted(action = action_name)
+          spec = self.class.open_api_generator_input_specs[action.to_s]
+          raise ArgumentError, "no api_params declared for #{self.class}##{action}" unless spec
+
+          spec.permit(params)
+        end
+      end
     end
 
     # Class methods added to controllers when ControllerDSL is included.
     module ClassMethods
+      def api_response(action, status: 200, serializer: nil, model: nil, collection: false, description: nil)
+        response = {
+          status: status,
+          serializer: serializer,
+          model: model,
+          collection: collection,
+          description: description
+        }
+        self.open_api_generator_response_specs = open_api_generator_response_specs.merge(action.to_s => response)
+      end
+
+      def api_params(action, permit:, wrapped_in: nil, model: nil)
+        spec = OpenApiGenerator::InputSpec.new(
+          action: action,
+          permit: permit,
+          wrapped_in: wrapped_in,
+          model: model
+        )
+        self.open_api_generator_input_specs = open_api_generator_input_specs.merge(action.to_s => spec)
+      end
+
       # Marks this controller to be included in the OpenAPI spec.
       #
       # By default, only ActionController::API controllers are included.
@@ -123,7 +155,7 @@ module OpenApiGenerator
       #     responses: {
       #       "201" => { description: "User created" }
       #     }
-      def swagger(action_name, summary: nil, description: nil, tags: nil, parameters: nil, request_body: nil, responses: nil)
+      def swagger(action_name, summary: nil, description: nil, tags: nil, parameters: nil, request_body: nil, responses: nil, security: nil, operation_id: nil, tool_name: nil, extensions: nil)
         action = action_name.to_s
         doc = {
           summary: summary,
@@ -131,8 +163,12 @@ module OpenApiGenerator
           tags: tags,
           parameters: parameters || [],
           requestBody: request_body,
-          responses: responses
+          responses: responses,
+          operation_id: operation_id,
+          tool_name: tool_name,
+          extensions: extensions
         }.compact
+        doc[:security] = security unless security.nil?
 
         self.open_api_generator_action_docs = open_api_generator_action_docs.merge(action => doc)
       end
