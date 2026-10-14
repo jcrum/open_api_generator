@@ -160,6 +160,25 @@ class OpenApiGeneratorInputSpecTest < ActiveSupport::TestCase
     assert_equal ["title"], spec.schema[:required]
   end
 
+  test "raises parameter missing when the wrapper key is not an object" do
+    spec = OpenApiGenerator::InputSpec.new(action: :create, wrapped_in: :user, permit: { name: :string })
+
+    ["foo", ["foo"]].each do |value|
+      params = ActionController::Parameters.new(user: value)
+
+      error = assert_raises(ActionController::ParameterMissing) { spec.permit(params) }
+
+      assert_equal :user, error.param
+    end
+  end
+
+  test "falls back to top-level params when the wrapper key is absent" do
+    spec = OpenApiGenerator::InputSpec.new(action: :create, wrapped_in: :user, permit: { name: :string })
+    params = ActionController::Parameters.new(name: "Ann", ignored: "no")
+
+    assert_equal({ name: "Ann" }, spec.permit(params))
+  end
+
   test "uses model enum values in input schemas" do
     spec = OpenApiGenerator::InputSpec.new(
       action: :create,

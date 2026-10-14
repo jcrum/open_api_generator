@@ -27,6 +27,8 @@ module OpenApiGenerator
 
     def permit(params)
       source = wrapped_in ? (params[wrapped_in] || params) : params
+      raise ActionController::ParameterMissing, wrapped_in if wrapped_in && !source.is_a?(ActionController::Parameters)
+
       source.permit(*permit_filters(fields)).to_h.deep_symbolize_keys
     end
 

@@ -5,6 +5,8 @@ module OpenApiGenerator
   #
   # Mounted at /spec.json and /spec.yaml by default.
   class OpenApiController < ActionController::Base
+    RACE_CONDITION_TTL = 30.seconds
+
     # Renders the OpenAPI spec as JSON.
     #
     # @return [void]
@@ -37,7 +39,7 @@ module OpenApiGenerator
       cfg = OpenApiGenerator.config
 
       if cfg.cache_enabled
-        Rails.cache.fetch(cfg.cache_key, expires_in: cfg.cache_ttl) do
+        Rails.cache.fetch(cfg.cache_key, expires_in: cfg.cache_ttl, race_condition_ttl: RACE_CONDITION_TTL) do
           OpenApiGenerator::SpecBuilder.call(config: cfg)
         end
       else
@@ -49,7 +51,7 @@ module OpenApiGenerator
       cfg = OpenApiGenerator.config
 
       if cfg.cache_enabled
-        Rails.cache.fetch("#{cfg.cache_key}/routes", expires_in: cfg.cache_ttl) do
+        Rails.cache.fetch("#{cfg.cache_key}/routes", expires_in: cfg.cache_ttl, race_condition_ttl: RACE_CONDITION_TTL) do
           OpenApiGenerator::SpecBuilder.route_introspection(config: cfg)
         end
       else
