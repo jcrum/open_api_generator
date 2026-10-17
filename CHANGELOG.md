@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- Add `Configuration#response_column_denylist` (default `[]`; Strings and Regexps, anything else
+  raises `ArgumentError`). It removes matching columns from response schemas built by the
+  `api_response model:` fallback only; serializer and request schemas are never filtered
+  (OAG-05). A model reused across actions yields one schema, so the registry never conflicts.
+- `api_response collection: true` now uses `serializer.open_api_collection_schema` when the
+  serializer defines it (component `<Name>Collection`); otherwise it is still an array of the
+  item schema.
+- Add `api_response envelope: :data` and the inherited class default
+  `open_api_generator_response_envelope` (`:data`, `:none` or nil). Single responses become
+  `{ data: X }` (`<Name>Envelope`), collections `{ data: [X], meta: { type: object } }`
+  (`<Name>ListEnvelope`); both require `data`, `meta` is optional. An invalid class-level default raises `ArgumentError` when a schema is built. Unchanged output when neither is set. Public response schemas of
+  enveloped actions change from the bare item to the wrapper.
+- Follow-up: Paxfish hosts still document bodies through `api_response model:`. They should migrate
+  to serializer-backed schemas (with `open_api_schema` matching `render`) in a later batch.
 - Add `Configuration#authorize` (callable taking the controller; `nil` = public). It runs
   before the cache read and the build, and a falsy result answers an empty `404` for
   `spec.json`, `spec.yaml` and `routes.json` (security finding OAG-01).

@@ -658,3 +658,214 @@ class OpenApiGeneratorRakeTaskTest < ActiveSupport::TestCase
     task.invoke
   end
 end
+
+class OpenApiGeneratorResponseSchemaTest < ActiveSupport::TestCase
+  def controller_with(&block)
+    controller = Class.new(ActionController::API)
+    controller.include OpenApiGenerator::ControllerDSL
+    controller.class_eval(&block) if block
+    controller
+  end
+
+  def build(controller, action, config: OpenApiGenerator::Configuration.new, registry: OpenApiGenerator::SchemaRegistry.new)
+    responses = OpenApiGenerator::ResponseBuilder.build(config, controller, action, {}, registry)
+    [responses, registry.to_h]
+  end
+
+  def schema_of(responses)
+    responses.values.first[:content]["application/json"][:schema]
+  end
+
+  def item_serializer(name: "GadgetSerializer", collection: false)
+    Class.new do
+      define_singleton_method(:name) { name }
+      define_singleton_method(:open_api_schema) { { type: "object", properties: { id: { type: "string" } } } }
+      if collection
+        define_singleton_method(:open_api_collection_schema) do
+          { type: "object", properties: { data: { type: "array", items: open_api_schema } } }
+        end
+      end
+    end
+  end
+
+  test "response_column_denylist defaults to empty and validates its entries" do
+    config = OpenApiGenerator::Configuration.new
+    assert_equal [], config.response_column_denylist
+
+    config.response_column_denylist = ["a", /token/, :b]
+    assert_equal ["a", /token/, "b"], config.response_column_denylist
+    assert config.response_column_denied?("a")
+    assert config.response_column_denied?("api_token_digest")
+    refute config.response_column_denied?("title")
+
+    assert_raises(ArgumentError) { config.response_column_denylist = [1] }
+    assert_raises(ArgumentError) { config.response_column_denylist = [nil] }
+  end
+
+  test "the denylist filters the model fallback only" do
+    config = OpenApiGenerator::Configuration.new
+    config.response_column_denylist = [/\Adesc/]
+    controller = controller_with { api_response :show, model: Gadget }
+
+    responses, schemas = build(controller, :show, config: config)
+
+    assert_equal({ "$ref" => "#/components/schemas/Gadget" }, schema_of(responses))
+    assert_equal %w[id title created_at updated_at], schemas["Gadget"][:properties].keys
+  end
+
+  test "the denylist never filters serializer schemas" do
+    config = OpenApiGenerator::Configuration.new
+    config.response_column_denylist = ["title"]
+    serializer = Class.new do
+      def self.name = "GadgetSerializer"
+      def self.open_api_schema = { type: "object", properties: { title: { type: "string" } } }
+    end
+    controller = controller_with { api_response :show, serializer: serializer }
+    _responses, schemas = build(controller, :show, config: config)
+    assert_equal [:title], schemas["Gadget"][:properties].keys
+  end
+
+  test "the denylist never filters request schemas built through SpecBuilder" do
+    route = OpenApiGenerator::RouteDiscovery::RouteInfo.new("POST", "/api/gadgets", "api/gadgets", "create")
+    config = OpenApiGenerator::Configuration.new
+    config.ignored_paths = []
+    config.included_base_controllers = ["Api::AuthenticatedBaseController"]
+    config.response_column_denylist = ["title", "description"]
+
+    spec = OpenApiGenerator::RouteDiscovery.stub(:call, [route]) do
+      OpenApiGenerator::SpecBuilder.call(config: config)
+    end
+
+    assert spec[:components][:schemas]["GadgetCreateRequest"][:properties].key?("title")
+    refute spec[:components][:schemas]["Gadget"][:properties].key?("title")
+  end
+
+  test "a model reused across actions registers one schema" do
+    config = OpenApiGenerator::Configuration.new
+    config.response_column_denylist = ["description"]
+    controller = controller_with do
+      api_response :index, model: Gadget, collection: true
+      api_response :show, model: Gadget
+      api_response :create, model: Gadget, envelope: :data
+    end
+    registry = OpenApiGenerator::SchemaRegistry.new
+
+    %i[index show create].each { |action| build(controller, action, config: config, registry: registry) }
+
+    refute registry.to_h["Gadget"][:properties].key?("description")
+  end
+
+  test "output is unchanged when no envelope is set" do
+    controller = controller_with do
+      api_response :show, model: Gadget
+      api_response :index, model: Gadget, collection: true
+    end
+
+    responses, schemas = build(controller, :show)
+    assert_equal({ "$ref" => "#/components/schemas/Gadget" }, schema_of(responses))
+    responses, = build(controller, :index)
+    assert_equal({ type: "array", items: { "$ref" => "#/components/schemas/Gadget" } }, schema_of(responses))
+    assert_equal ["Gadget"], schemas.keys
+  end
+
+  test "envelope data wraps a model schema" do
+    controller = controller_with do
+      api_response :show, model: Gadget, envelope: :data
+      api_response :index, model: Gadget, collection: true, envelope: :data
+    end
+    registry = OpenApiGenerator::SchemaRegistry.new
+
+    show, = build(controller, :show, registry: registry)
+    index, = build(controller, :index, registry: registry)
+    schemas = registry.to_h
+
+    assert_equal({ "$ref" => "#/components/schemas/GadgetEnvelope" }, schema_of(show))
+    assert_equal({ type: "object", properties: { data: { "$ref" => "#/components/schemas/Gadget" } }, required: ["data"] }, schemas["GadgetEnvelope"])
+    assert_equal({ "$ref" => "#/components/schemas/GadgetListEnvelope" }, schema_of(index))
+    assert_equal(
+      { type: "object", properties: { data: { type: "array", items: { "$ref" => "#/components/schemas/Gadget" } }, meta: { type: "object" } }, required: ["data"] },
+      schemas["GadgetListEnvelope"]
+    )
+  end
+
+  test "envelope data wraps a serializer item schema and ignores its collection schema" do
+    serializer = item_serializer(collection: true)
+    controller = controller_with do
+      api_response :index, serializer: serializer, collection: true, envelope: :data
+    end
+
+    responses, schemas = build(controller, :index)
+
+    assert_equal({ "$ref" => "#/components/schemas/GadgetListEnvelope" }, schema_of(responses))
+    assert_equal serializer.open_api_schema, schemas["Gadget"]
+    refute schemas.key?("GadgetCollection")
+  end
+
+  test "collection uses the serializer collection schema when defined" do
+    serializer = item_serializer(collection: true)
+    controller = controller_with { api_response :index, serializer: serializer, collection: true }
+
+    responses, schemas = build(controller, :index)
+
+    assert_equal({ "$ref" => "#/components/schemas/GadgetCollection" }, schema_of(responses))
+    assert_equal serializer.open_api_collection_schema, schemas["GadgetCollection"]
+  end
+
+  test "collection without a serializer collection schema stays an array of the item schema" do
+    serializer = item_serializer
+    controller = controller_with { api_response :index, serializer: serializer, collection: true }
+
+    responses, = build(controller, :index)
+
+    assert_equal({ type: "array", items: { "$ref" => "#/components/schemas/Gadget" } }, schema_of(responses))
+  end
+
+  test "the class-level envelope default is inherited and overridable" do
+    parent = controller_with { self.open_api_generator_response_envelope = :data }
+    child = Class.new(parent) do
+      api_response :show, model: Gadget
+      api_response :create, model: Gadget, envelope: :none
+    end
+    bare = Class.new(parent) do
+      self.open_api_generator_response_envelope = :none
+      api_response :show, model: Gadget
+    end
+
+    assert_equal({ "$ref" => "#/components/schemas/GadgetEnvelope" }, schema_of(build(child, :show).first))
+    assert_equal({ "$ref" => "#/components/schemas/Gadget" }, schema_of(build(child, :create).first))
+    assert_equal({ "$ref" => "#/components/schemas/Gadget" }, schema_of(build(bare, :show).first))
+  end
+
+  test "enveloped and bare use of one model never conflict in the registry" do
+    controller = controller_with do
+      api_response :show, model: Gadget, envelope: :data
+      api_response :create, model: Gadget
+      api_response :index, model: Gadget, collection: true, envelope: :data
+    end
+    registry = OpenApiGenerator::SchemaRegistry.new
+
+    %i[show create index].each { |action| build(controller, action, registry: registry) }
+
+    assert_equal %w[Gadget GadgetEnvelope GadgetListEnvelope].sort, registry.to_h.keys.sort
+  end
+
+  test "re-including the DSL in a subclass keeps an inherited envelope default" do
+    parent = controller_with { self.open_api_generator_response_envelope = :none }
+    child = Class.new(parent) { include OpenApiGenerator::ControllerDSL }
+
+    assert_equal :none, child.open_api_generator_response_envelope
+  end
+
+  test "an invalid class-level envelope raises when the schema is built" do
+    controller = controller_with do
+      self.open_api_generator_response_envelope = :wrap
+      api_response :show, model: Gadget
+    end
+
+    assert_raises(ArgumentError) { build(controller, :show) }
+  end
+
+  test "api_response rejects an unknown envelope" do
+    assert_raises(ArgumentError) { controller_with { api_response :show, model: Gadget, envelope: :wrap } }
+  end
+end

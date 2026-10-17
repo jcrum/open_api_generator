@@ -73,6 +73,29 @@ module OpenApiGenerator
       @enforce_required = value
     end
 
+    # @return [Array<String, Regexp>] column names (strings) or patterns (Regexp) left out of
+    #   response schemas built by the model fallback in `api_response model:`. Serializer
+    #   schemas and request schemas (`api_params`) are never filtered. Default `[]`.
+    attr_reader :response_column_denylist
+
+    # @param value [Array<String, Regexp>, String, Regexp, nil]
+    # @raise [ArgumentError] unless every entry is a String, Symbol or Regexp
+    def response_column_denylist=(value)
+      entries = Array(value)
+      unless entries.all? { |entry| entry.is_a?(String) || entry.is_a?(Symbol) || entry.is_a?(Regexp) }
+        raise ArgumentError, "response_column_denylist entries must be Strings or Regexps"
+      end
+
+      @response_column_denylist = entries.map { |entry| entry.is_a?(Symbol) ? entry.to_s : entry }.freeze
+    end
+
+    # @param column_name [String, Symbol]
+    # @return [Boolean] whether the denylist hides this column from model response schemas
+    def response_column_denied?(column_name)
+      name = column_name.to_s
+      response_column_denylist.any? { |entry| entry.is_a?(Regexp) ? entry.match?(name) : entry == name }
+    end
+
     # @return [ActiveSupport::Duration] how long to cache the spec
     attr_accessor :cache_ttl
 
@@ -94,6 +117,7 @@ module OpenApiGenerator
       @cache_key = nil
       @authorize = nil
       @enforce_required = false
+      @response_column_denylist = [].freeze
       @cache_ttl = 10.minutes
       @default_response_description = "OK"
     end

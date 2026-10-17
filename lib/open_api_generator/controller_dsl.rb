@@ -31,6 +31,13 @@ module OpenApiGenerator
       base.class_attribute :open_api_generator_ignored_actions, default: Set.new
       base.class_attribute :open_api_generator_input_specs, default: {}
       base.class_attribute :open_api_generator_response_specs, default: {}
+      # Class-level default for `api_response envelope:`. nil and :none mean no envelope;
+      # :data wraps bodies as `{ data: ..., meta: ... }`. Inherited; a subclass or a
+      # single `api_response envelope:` overrides it.
+      # Not redefined when an ancestor already included the DSL, so a host base class can set it.
+      unless base.respond_to?(:open_api_generator_response_envelope)
+        base.class_attribute :open_api_generator_response_envelope, default: nil
+      end
 
       base.class_eval do
         def permitted(action = action_name)
@@ -44,13 +51,25 @@ module OpenApiGenerator
 
     # Class methods added to controllers when ControllerDSL is included.
     module ClassMethods
-      def api_response(action, status: 200, serializer: nil, model: nil, collection: false, description: nil)
+      ENVELOPES = %i[data none].freeze
+
+      # Declares the response of an action.
+      #
+      # @param envelope [Symbol, nil] `:data` wraps the schema as `{ data: X }`, or
+      #   `{ data: [X], meta: { type: object } }` when `collection: true`. `:none` leaves it
+      #   bare. nil uses the class default (`open_api_generator_response_envelope`).
+      def api_response(action, status: 200, serializer: nil, model: nil, collection: false, description: nil, envelope: nil)
+        unless envelope.nil? || ENVELOPES.include?(envelope)
+          raise ArgumentError, "envelope must be one of #{ENVELOPES.inspect}, got #{envelope.inspect}"
+        end
+
         response = {
           status: status,
           serializer: serializer,
           model: model,
           collection: collection,
-          description: description
+          description: description,
+          envelope: envelope
         }
         self.open_api_generator_response_specs = open_api_generator_response_specs.merge(action.to_s => response)
       end
