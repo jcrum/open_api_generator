@@ -297,6 +297,122 @@ class OpenApiGeneratorInputSpecTest < ActiveSupport::TestCase
   end
 end
 
+class OpenApiGeneratorRequiredSchemaTest < ActiveSupport::TestCase
+  test "emits required for scalar, nested and array-of-object fields" do
+    spec = OpenApiGenerator::InputSpec.new(
+      action: :create,
+      permit: {
+        title: :string!,
+        "actor!": { kind: :string!, email: :string },
+        detail: { note: :string!, extra: :string },
+        targets: [[ target_id: :uuid!, role: :string ]],
+        "lines!": [[ sku: :string!, quantity: :integer ]]
+      }
+    )
+    schema = spec.schema
+
+    assert_equal %w[title actor lines], schema[:required]
+    assert_equal %w[kind], schema.dig(:properties, "actor", :required)
+    assert_equal %w[note], schema.dig(:properties, "detail", :required)
+    assert_nil schema.dig(:properties, "detail", :properties, "extra", :required)
+    assert_equal %w[target_id], schema.dig(:properties, "targets", :items, :required)
+    assert_equal %w[sku], schema.dig(:properties, "lines", :items, :required)
+    assert_includes schema.dig(:properties).keys, "actor"
+  end
+
+  test "permit returns values for required-marked nested and array keys with enforcement off" do
+    spec = OpenApiGenerator::InputSpec.new(
+      action: :create,
+      permit: { "actor!": { kind: :string! }, "lines!": [[ sku: :string! ]] }
+    )
+    params = ActionController::Parameters.new(actor: { kind: "x", ignored: 1 }, lines: [{ sku: "a" }])
+
+    assert_equal({ actor: { kind: "x" }, lines: [{ sku: "a" }] }, spec.permit(params))
+  end
+
+  test "omits required when nothing is marked" do
+    spec = OpenApiGenerator::InputSpec.new(action: :create, permit: { detail: { note: :string } })
+
+    assert_not spec.schema.key?(:required)
+    assert_not spec.schema.dig(:properties, "detail").key?(:required)
+  end
+end
+
+class OpenApiGeneratorEnforceRequiredTest < ActiveSupport::TestCase
+  setup { @original = OpenApiGenerator.config.enforce_required }
+  teardown { OpenApiGenerator.config.enforce_required = @original }
+
+  def spec(wrapped_in: nil)
+    OpenApiGenerator::InputSpec.new(
+      action: :create,
+      wrapped_in: wrapped_in,
+      permit: { title: :string!, done: :boolean!, note: :string, detail: { inner: :string! } }
+    )
+  end
+
+  test "defaults to false and a non-boolean value is rejected" do
+    assert_equal false, OpenApiGenerator::Configuration.new.enforce_required
+    assert_raises(ArgumentError) { OpenApiGenerator.config.enforce_required = "yes" }
+    assert_raises(ArgumentError) { OpenApiGenerator.config.enforce_required = nil }
+  end
+
+  test "off by default leaves missing required fields alone" do
+    assert_equal({ note: "n" }, spec.permit(ActionController::Parameters.new(note: "n")))
+  end
+
+  test "on raises ParameterMissing for a missing or nil top-level required field" do
+    OpenApiGenerator.config.enforce_required = true
+
+    error = assert_raises(ActionController::ParameterMissing) { spec.permit(ActionController::Parameters.new(done: true)) }
+    assert_equal "title", error.param
+    error = assert_raises(ActionController::ParameterMissing) { spec.permit(ActionController::Parameters.new(title: nil, done: true)) }
+    assert_equal "title", error.param
+    error = assert_raises(ActionController::ParameterMissing) { spec.permit(ActionController::Parameters.new(title: "t")) }
+    assert_equal "done", error.param
+  end
+
+  test "on lets false and empty string through to the model" do
+    OpenApiGenerator.config.enforce_required = true
+
+    assert_equal({ title: "", done: false }, spec.permit(ActionController::Parameters.new(title: "", done: false)))
+  end
+
+  test "on does not enforce nested required fields" do
+    OpenApiGenerator.config.enforce_required = true
+    params = ActionController::Parameters.new(title: "t", done: true, detail: { other: "x" })
+
+    assert_equal({ title: "t", done: true, detail: {} }, spec.permit(params))
+  end
+
+  test "on treats a wrong-shaped value that permit drops as missing" do
+    OpenApiGenerator.config.enforce_required = true
+    params = ActionController::Parameters.new(title: { nested: "x" }, done: true)
+
+    error = assert_raises(ActionController::ParameterMissing) { spec.permit(params) }
+    assert_equal "title", error.param
+  end
+
+  test "on does not let a path parameter satisfy a flat body field" do
+    OpenApiGenerator.config.enforce_required = true
+    flat = OpenApiGenerator::InputSpec.new(action: :update, permit: { id: :string!, note: :string })
+    params = ActionController::Parameters.new(id: "from-path", note: "n")
+
+    assert_raises(ActionController::ParameterMissing) { flat.permit(params, path_keys: [ :id ]) }
+    assert_equal({ id: "from-body", note: "n" },
+      flat.permit(ActionController::Parameters.new(id: "from-body", note: "n"), path_keys: []))
+  end
+
+  test "on enforces wrapped and flat bodies" do
+    OpenApiGenerator.config.enforce_required = true
+    wrapped = spec(wrapped_in: :card)
+
+    assert_equal({ title: "t", done: false }, wrapped.permit(ActionController::Parameters.new(card: { title: "t", done: false })))
+    assert_raises(ActionController::ParameterMissing) { wrapped.permit(ActionController::Parameters.new(card: { done: false })) }
+    assert_equal({ title: "t", done: false }, wrapped.permit(ActionController::Parameters.new(title: "t", done: false)))
+    assert_raises(ActionController::ParameterMissing) { wrapped.permit(ActionController::Parameters.new(done: false)) }
+  end
+end
+
 class OpenApiGeneratorSpecBuilderTest < ActiveSupport::TestCase
   test "builds spec for documented route" do
     route = OpenApiGenerator::RouteDiscovery::RouteInfo.new("GET", "/api/widgets/:id", "api/widgets", "show")

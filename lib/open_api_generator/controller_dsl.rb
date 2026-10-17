@@ -37,7 +37,7 @@ module OpenApiGenerator
           spec = self.class.open_api_generator_input_specs[action.to_s]
           raise ArgumentError, "no api_params declared for #{self.class}##{action}" unless spec
 
-          spec.permit(params)
+          spec.permit(params, path_keys: request&.path_parameters&.keys || [])
         end
       end
     end

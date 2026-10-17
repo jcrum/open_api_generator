@@ -60,6 +60,19 @@ module OpenApiGenerator
       @authorize = callable
     end
 
+    # @return [Boolean] when true, `permitted` raises ActionController::ParameterMissing
+    #   for a top-level `!` field whose key is missing or nil (`false` and "" pass).
+    #   Default false: `!` is schema-only. Nested `!` fields are never enforced.
+    attr_reader :enforce_required
+
+    # @param value [Boolean]
+    # @raise [ArgumentError] unless true or false
+    def enforce_required=(value)
+      raise ArgumentError, "enforce_required must be true or false" unless value == true || value == false
+
+      @enforce_required = value
+    end
+
     # @return [ActiveSupport::Duration] how long to cache the spec
     attr_accessor :cache_ttl
 
@@ -80,6 +93,7 @@ module OpenApiGenerator
       @cache_enabled = !Rails.env.development?
       @cache_key = nil
       @authorize = nil
+      @enforce_required = false
       @cache_ttl = 10.minutes
       @default_response_description = "OK"
     end

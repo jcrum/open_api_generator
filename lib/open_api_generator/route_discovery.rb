@@ -32,6 +32,9 @@ module OpenApiGenerator
         next unless engine.routes.routes.any?
 
         mount_point = find_engine_mount_point(engine)
+        # An engine with no mount point is unreachable; never document it as root.
+        next if mount_point.nil?
+
         all_routes.concat(extract_routes(engine.routes.routes, config, mount_point))
       end
 
@@ -63,7 +66,8 @@ module OpenApiGenerator
     # Finds where an engine is mounted in the main application.
     #
     # @param engine_class [Class] the engine class to find
-    # @return [String] the mount path (e.g., "/api/v1") or empty string if mounted at root
+    # @return [String, nil] the mount path (e.g., "/api/v1"), "/" or "" for an engine
+    #   mounted at root, or nil when the engine is not mounted anywhere
     def self.find_engine_mount_point(engine_class)
       Rails.application.routes.routes.each do |route|
         app = route.app
@@ -77,7 +81,7 @@ module OpenApiGenerator
         end
       end
 
-      ""
+      nil
     end
   end
 end

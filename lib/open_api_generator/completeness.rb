@@ -1,7 +1,8 @@
 # frozen_string_literal: true
 
 module OpenApiGenerator
-  # Audits write operations for a machine-readable request body declaration.
+  # Audits write operations for a machine-readable request body declaration, and
+  # that every documented operation is served by a route the host can reach.
   module Completeness
     Offense = Struct.new(:controller, :action, :verb, :path, keyword_init: true)
     WRITE = %w[POST PUT PATCH].freeze
@@ -19,6 +20,35 @@ module OpenApiGenerator
           verb: operation[:verb],
           path: operation[:path]
         )
+      end
+    end
+
+    # Lists documented operations that the host routes do not serve as documented
+    # (for example an engine documented without a mount point). Each documented
+    # operation's path is filled with sample values and recognized against
+    # `Rails.application.routes` (Rails descends into mounted engines). It counts as
+    # reachable only when the recognized controller and action match the documented ones.
+    #
+    # Limits: recognition runs without a request, so route constraints that are lambdas
+    # over the request (headers, host, subdomain) cannot be satisfied and are reported as
+    # unreachable, and a path param needs a sample that satisfies its route constraint.
+    #
+    # @param samples [Hash{String=>String}] values for path parameters; others use "1"
+    # @return [Array<String>] "VERB /path" strings
+    def self.unreachable(config:, samples: {})
+      operations = SpecBuilder.__send__(:discover_operations, config, include_ignored: false)
+
+      operations.uniq { |op| [ op[:verb], op[:path], op[:controller], op[:action] ] }.filter_map do |operation|
+        sample = operation[:path].gsub(/\{([^}]+)\}/) { samples.fetch(Regexp.last_match(1), "1") }
+        recognized = begin
+          Rails.application.routes.recognize_path(sample, method: operation[:verb].to_s.downcase.to_sym)
+        rescue ActionController::RoutingError
+          nil
+        end
+        served = recognized &&
+          "#{recognized[:controller]}_controller".camelize == operation[:controller] &&
+          recognized[:action] == operation[:action]
+        "#{operation[:verb].to_s.upcase} #{operation[:path]}" unless served
       end
     end
   end
