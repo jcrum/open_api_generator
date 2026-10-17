@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `swagger :action, tool_name: true` sets `x-tool-name` to the operation's generated `operationId`, for an
+  action routed more than once (a string `tool_name:` would give every route the same name). Strings are unchanged.
 - Add `Configuration#response_column_denylist` (default `[]`; Strings and Regexps, anything else
   raises `ArgumentError`). It removes matching columns from response schemas built by the
   `api_response model:` fallback only; serializer and request schemas are never filtered

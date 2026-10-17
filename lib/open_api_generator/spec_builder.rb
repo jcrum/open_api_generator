@@ -151,7 +151,11 @@ module OpenApiGenerator
       request_body = RequestBodyBuilder.build(controller_class, action, docs, registry)
       operation[:requestBody] = request_body if request_body
       operation[:security] = docs[:security] if docs.key?(:security)
-      operation["x-tool-name"] = docs[:tool_name] if docs[:tool_name]
+      # `tool_name: true` exposes the operation under its own operationId. Use it
+      # for an action routed more than once, where a single string would give
+      # every route the same name.
+      tool_name = docs[:tool_name] == true ? operation[:operationId] : docs[:tool_name]
+      operation["x-tool-name"] = tool_name if tool_name
       docs[:extensions]&.each do |key, value|
         extension = key.to_s.start_with?("x-") ? key.to_s : "x-#{key}"
         operation[extension] = value

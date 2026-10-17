@@ -174,6 +174,8 @@ module OpenApiGenerator
       #     responses: {
       #       "201" => { description: "User created" }
       #     }
+      # `tool_name:` tags the operation as an MCP tool (`x-tool-name`). Pass `true` to
+      # use the generated operationId (for an action routed more than once).
       def swagger(action_name, summary: nil, description: nil, tags: nil, parameters: nil, request_body: nil, responses: nil, security: nil, operation_id: nil, tool_name: nil, extensions: nil)
         action = action_name.to_s
         doc = {

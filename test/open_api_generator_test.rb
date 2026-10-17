@@ -128,6 +128,25 @@ class OpenApiGeneratorControllerDSLTest < ActiveSupport::TestCase
     assert_includes controller.open_api_generator_ignored_actions, "secret"
   end
 
+  test "tool_name tags the operation, and true reuses the operationId for each route" do
+    stub_const = Class.new(ActionController::API)
+    stub_const.include OpenApiGenerator::ControllerDSL
+    Object.const_set(:ToolTaggedWidgetsController, stub_const)
+    stub_const.swagger :show, tool_name: "fetch_widget"
+    stub_const.swagger :update, tool_name: true
+    config = OpenApiGenerator.config
+
+    named = OpenApiGenerator::SpecBuilder.build_operation(config, stub_const, "show", "/api/v1/tool_tagged_widgets/{id}", OpenApiGenerator::SchemaRegistry.new, "get")
+    by_context = OpenApiGenerator::SpecBuilder.build_operation(config, stub_const, "update", "/api/v1/boards/{board_id}/tool_tagged_widgets/{id}", OpenApiGenerator::SchemaRegistry.new, "patch")
+    plain = OpenApiGenerator::SpecBuilder.build_operation(config, stub_const, "update", "/api/v1/tool_tagged_widgets/{id}", OpenApiGenerator::SchemaRegistry.new, "patch")
+
+    assert_equal "fetch_widget", named["x-tool-name"]
+    assert_equal "update_tool_tagged_widget_by_board", by_context["x-tool-name"]
+    assert_equal "update_tool_tagged_widget", plain["x-tool-name"]
+  ensure
+    Object.send(:remove_const, :ToolTaggedWidgetsController) if Object.const_defined?(:ToolTaggedWidgetsController)
+  end
+
   test "preserves an explicit empty security requirement" do
     controller = Class.new(ActionController::API)
     controller.include OpenApiGenerator::ControllerDSL
