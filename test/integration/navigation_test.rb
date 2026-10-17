@@ -19,6 +19,8 @@ class NavigationTest < ActionDispatch::IntegrationTest
     assert_response :success
 
     spec = JSON.parse(response.body)
+    assert_equal "3.0.3", spec["openapi"]
+    assert_not spec.key?("open_api")
     assert_equal "Dummy API", spec.dig("info", "title")
     assert_equal "1.0.0", spec.dig("info", "version")
 

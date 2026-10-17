@@ -33,7 +33,7 @@ module OpenApiGenerator
       end
 
       spec = {
-        open_api: "3.0.3",
+        openapi: "3.0.3",
         info: build_info(config),
         servers: config.servers,
         paths: paths,
@@ -53,12 +53,12 @@ module OpenApiGenerator
     # request body declaration. This is intentionally separate from the final
     # OpenAPI document so completeness checks can run without duplicating route
     # filtering logic.
-    def self.discover_operations(config)
+    def self.discover_operations(config, include_ignored: false)
       RouteDiscovery.call(config: config).filter_map do |route|
         controller_class = constantize_controller(route.controller)
         next unless controller_class
         next if config.ignored_controllers.include?(controller_class.name)
-        next unless include_controller?(controller_class, config)
+        next unless include_controller?(controller_class, config, include_ignored: include_ignored)
         next if ignore_action?(controller_class, route.action)
 
         docs = get_action_docs(controller_class, route.action)
@@ -86,12 +86,12 @@ module OpenApiGenerator
     #
     # @param controller_class [Class] the controller class
     # @return [Boolean] true if the controller should be included
-    def self.include_controller?(controller_class, config)
+    def self.include_controller?(controller_class, config, include_ignored: false)
       return false unless controller_class.respond_to?(:open_api_generator_json_mode)
 
       mode = controller_class.open_api_generator_json_mode
       return true if mode == :json
-      return false if mode == :ignore
+      return include_ignored if mode == :ignore
 
       included_by_ancestor?(controller_class, config) || controller_class < ActionController::API
     end

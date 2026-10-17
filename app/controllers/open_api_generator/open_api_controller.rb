@@ -7,6 +7,10 @@ module OpenApiGenerator
   class OpenApiController < ActionController::Base
     RACE_CONDITION_TTL = 30.seconds
 
+    # Runs before the cache read or the build. A falsy `config.authorize`
+    # answer is a bare 404 so the docs never confirm they exist.
+    before_action :authorize_docs!
+
     # Renders the OpenAPI spec as JSON.
     #
     # @return [void]
@@ -31,6 +35,13 @@ module OpenApiGenerator
     end
 
     private
+
+    def authorize_docs!
+      authorizer = OpenApiGenerator.config.authorize
+      return if authorizer.nil?
+
+      head :not_found unless authorizer.call(self)
+    end
 
     # Builds or retrieves the cached OpenAPI spec.
     #

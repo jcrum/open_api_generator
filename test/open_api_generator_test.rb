@@ -21,9 +21,94 @@ class OpenApiGeneratorConfigurationTest < ActiveSupport::TestCase
     assert_nil config.security
     assert_equal [], config.included_base_controllers
     assert config.cache_enabled
-    assert_equal "open_api_generator/open_api", config.cache_key
+    assert_nil config.authorize
+    assert config.cache_key.start_with?("open_api_generator/open_api/")
     assert_equal 10.minutes, config.cache_ttl
     assert_equal "OK", config.default_response_description
+  end
+end
+
+module Api
+  class HiddenThingsController < ActionController::API
+    include OpenApiGenerator::ControllerDSL
+    swagger_ignore!
+
+    def create; end
+  end
+end
+
+class OpenApiGeneratorAuthorizeSetterTest < ActiveSupport::TestCase
+  test "accepts nil and callables and rejects anything else" do
+    config = OpenApiGenerator::Configuration.new
+    config.authorize = ->(_controller) { true }
+    config.authorize = nil
+    assert_nil config.authorize
+
+    assert_raises(ArgumentError) { config.authorize = true }
+    assert_raises(ArgumentError) { config.authorize = "yes" }
+  end
+end
+
+class OpenApiGeneratorCacheKeyTest < ActiveSupport::TestCase
+  test "a host override is used verbatim" do
+    config = OpenApiGenerator::Configuration.new
+    config.cache_key = "custom/key"
+
+    assert_equal "custom/key", config.cache_key
+  end
+
+  test "the default key follows the release when set" do
+    config = OpenApiGenerator::Configuration.new
+    keys = %w[r1 r2 r1].map do |release|
+      Rails.application.config.x.stub(:release, release) { config.cache_key }
+    end
+
+    assert_equal keys[0], keys[2]
+    refute_equal keys[0], keys[1]
+    assert_match(%r{\Aopen_api_generator/open_api/\h{16}\z}, keys[0])
+  end
+
+  test "the default key falls back to a digest of the route set" do
+    config = OpenApiGenerator::Configuration.new
+    config.ignored_paths = []
+    route = ->(path) { [OpenApiGenerator::RouteDiscovery::RouteInfo.new("GET", path, "api/widgets", "index")] }
+
+    first = OpenApiGenerator::RouteDiscovery.stub(:call, route.call("/api/a")) { config.cache_key }
+    config.instance_variable_set(:@route_digest, nil)
+    second = OpenApiGenerator::RouteDiscovery.stub(:call, route.call("/api/b")) { config.cache_key }
+
+    refute_equal first, second
+  end
+
+  test "different discriminators use separate cache entries and a raising build re-raises" do
+    store = ActiveSupport::Cache::MemoryStore.new
+    config = OpenApiGenerator.config
+    original_cache_enabled = config.cache_enabled
+    config.cache_enabled = true
+    builds = 0
+    builder = ->(**) { { "build" => builds += 1 } }
+
+    begin
+      Rails.stub(:cache, store) do
+        OpenApiGenerator::SpecBuilder.stub(:call, builder) do
+          first = Rails.application.config.x.stub(:release, "r1") { OpenApiGenerator::OpenApiController.new.send(:spec) }
+          again = Rails.application.config.x.stub(:release, "r1") { OpenApiGenerator::OpenApiController.new.send(:spec) }
+          other = Rails.application.config.x.stub(:release, "r2") { OpenApiGenerator::OpenApiController.new.send(:spec) }
+
+          assert_equal first, again
+          refute_equal first, other
+        end
+
+        failing = ->(**) { raise "boom" }
+        OpenApiGenerator::SpecBuilder.stub(:call, failing) do
+          Rails.application.config.x.stub(:release, "r3") do
+            assert_raises(RuntimeError) { OpenApiGenerator::OpenApiController.new.send(:spec) }
+          end
+        end
+      end
+    ensure
+      config.cache_enabled = original_cache_enabled
+    end
   end
 end
 
@@ -349,6 +434,21 @@ class OpenApiGeneratorSpecBuilderTest < ActiveSupport::TestCase
     assert_equal "POST", offenses.first.verb
     assert_equal "/api/widgets", offenses.first.path
     assert_equal "Api::WidgetsController", offenses.first.controller
+  end
+
+  test "audit skips ignored controllers unless include_ignored is true" do
+    routes = [OpenApiGenerator::RouteDiscovery::RouteInfo.new("POST", "/api/hidden_things", "api/hidden_things", "create")]
+    config = OpenApiGenerator::Configuration.new
+    config.ignored_paths = []
+
+    default = OpenApiGenerator::RouteDiscovery.stub(:call, routes) { OpenApiGenerator::Completeness.audit(config: config) }
+    audited = OpenApiGenerator::RouteDiscovery.stub(:call, routes) do
+      OpenApiGenerator::Completeness.audit(config: config, include_ignored: true)
+    end
+
+    assert_empty default
+    assert_equal ["Api::HiddenThingsController"], audited.map(&:controller)
+    assert_equal "/api/hidden_things", audited.first.path
   end
 
   test "permitted filters wrapped input params" do
