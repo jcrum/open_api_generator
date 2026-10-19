@@ -148,7 +148,7 @@ module OpenApiGenerator
 
       operation[:summary] = docs[:summary] if docs[:summary]
       operation[:description] = docs[:description] if docs[:description]
-      request_body = RequestBodyBuilder.build(controller_class, action, docs, registry)
+      request_body = RequestBodyBuilder.build(controller_class, action, docs, registry, config: config)
       operation[:requestBody] = request_body if request_body
       operation[:security] = docs[:security] if docs.key?(:security)
       # `tool_name: true` exposes the operation under its own operationId. Use it
@@ -261,10 +261,10 @@ module OpenApiGenerator
       return docs[:tags] if docs[:tags]
 
       if controller_class.respond_to?(:open_api_generator_tag) && controller_class.open_api_generator_tag
-        return [controller_class.open_api_generator_tag]
+        return [ controller_class.open_api_generator_tag ]
       end
 
-      [generate_tag_from_controller(controller_class)]
+      [ generate_tag_from_controller(controller_class) ]
     end
 
     # Generates a tag name from a controller class name.

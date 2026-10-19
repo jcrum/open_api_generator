@@ -71,10 +71,10 @@ module OpenApiGenerator
 
     # The legacy model fallback: every column except those the host denylisted.
     def self.model_schema(config, model)
-      return ModelSchema.schema_for(model) unless model.respond_to?(:columns_hash)
+      return ModelSchema.schema_for(model, config: config) unless model.respond_to?(:columns_hash)
 
       denied = model.columns_hash.keys.select { |column| config.response_column_denied?(column) }
-      ModelSchema.schema_for(model, except: denied)
+      ModelSchema.schema_for(model, except: denied, config: config)
     end
 
     # Kept for callers of the previous signature.

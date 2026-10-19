@@ -40,8 +40,8 @@ module OpenApiGenerator
       permitted
     end
 
-    def schema
-      object_schema(fields)
+    def schema(config = OpenApiGenerator.config)
+      object_schema(fields, config)
     end
 
     def schema_name(controller_class: nil)
@@ -117,30 +117,30 @@ module OpenApiGenerator
       end
     end
 
-    def object_schema(list)
-      result = { type: "object", properties: list.each_with_object({}) { |field, properties| properties[field.name] = field_schema(field) } }
+    def object_schema(list, config)
+      result = { type: "object", properties: list.each_with_object({}) { |field, properties| properties[field.name] = field_schema(field, config) } }
       required = list.select(&:required).map(&:name)
       result[:required] = required if required.any?
       result
     end
 
-    def field_schema(field)
+    def field_schema(field, config)
       if field.array_object?
-        { type: "array", items: object_schema(field.array_children) }
+        { type: "array", items: object_schema(field.array_children, config) }
       elsif field.object?
-        object_schema(field.children)
+        object_schema(field.children, config)
       elsif field.array?
-        TypeMapper.array(field.type)
+        TypeMapper.array(field.type, config)
       else
-        column_or_scalar(field)
+        column_or_scalar(field, config)
       end
     end
 
-    def column_or_scalar(field)
+    def column_or_scalar(field, config)
       if model&.respond_to?(:defined_enums) && model.defined_enums.key?(field.name)
         { type: "string", enum: model.defined_enums[field.name].keys }
       else
-        TypeMapper.scalar(field.type)
+        TypeMapper.scalar(field.type, config)
       end
     end
   end

@@ -2,13 +2,13 @@
 
 module OpenApiGenerator
   module RequestBodyBuilder
-    def self.build(controller_class, action, docs, registry)
+    def self.build(controller_class, action, docs, registry, config: OpenApiGenerator.config)
       return docs[:requestBody] if docs[:requestBody]
 
       spec = input_spec(controller_class, action)
       return unless spec
 
-      reference = registry.register(spec.schema_name(controller_class: controller_class), spec.schema)
+      reference = registry.register(spec.schema_name(controller_class: controller_class), spec.schema(config))
       {
         required: spec.fields.any?(&:required),
         content: { "application/json" => { schema: reference } }

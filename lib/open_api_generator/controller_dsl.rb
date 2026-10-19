@@ -25,21 +25,24 @@ module OpenApiGenerator
   module ControllerDSL
     def self.included(base)
       base.extend(ClassMethods)
-      base.class_attribute :open_api_generator_json_mode, default: :auto
-      base.class_attribute :open_api_generator_tag, default: nil
-      base.class_attribute :open_api_generator_action_docs, default: {}
-      base.class_attribute :open_api_generator_ignored_actions, default: Set.new
-      base.class_attribute :open_api_generator_input_specs, default: {}
-      base.class_attribute :open_api_generator_response_specs, default: {}
+      base.class_attribute :open_api_generator_json_mode, instance_accessor: false, default: :auto
+      base.class_attribute :open_api_generator_tag, instance_accessor: false, default: nil
+      base.class_attribute :open_api_generator_action_docs, instance_accessor: false, default: {}
+      base.class_attribute :open_api_generator_ignored_actions, instance_accessor: false, default: Set.new
+      base.class_attribute :open_api_generator_input_specs, instance_accessor: false, default: {}
+      base.class_attribute :open_api_generator_response_specs, instance_accessor: false, default: {}
       # Class-level default for `api_response envelope:`. nil and :none mean no envelope;
       # :data wraps bodies as `{ data: ..., meta: ... }`. Inherited; a subclass or a
       # single `api_response envelope:` overrides it.
       # Not redefined when an ancestor already included the DSL, so a host base class can set it.
       unless base.respond_to?(:open_api_generator_response_envelope)
-        base.class_attribute :open_api_generator_response_envelope, default: nil
+        base.class_attribute :open_api_generator_response_envelope, instance_accessor: false, default: nil
       end
 
+      # Private so it is never routable as an action.
       base.class_eval do
+        private
+
         def permitted(action = action_name)
           spec = self.class.open_api_generator_input_specs[action.to_s]
           raise ArgumentError, "no api_params declared for #{self.class}##{action}" unless spec

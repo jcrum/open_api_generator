@@ -16,7 +16,7 @@ class OpenApiGeneratorConfigurationTest < ActiveSupport::TestCase
     assert_equal "API", config.title
     assert_equal "1.0.0", config.version
     assert_nil config.description
-    assert_equal [{ url: "/" }], config.servers
+    assert_equal [ { url: "/" } ], config.servers
     assert_equal({}, config.security_schemes)
     assert_nil config.security
     assert_equal [], config.included_base_controllers
@@ -68,10 +68,48 @@ class OpenApiGeneratorCacheKeyTest < ActiveSupport::TestCase
     assert_match(%r{\Aopen_api_generator/open_api/\h{16}\z}, keys[0])
   end
 
+  test "the default key follows KAMAL_VERSION when no release is set, and x.release wins" do
+    config = OpenApiGenerator::Configuration.new
+    original = ENV["KAMAL_VERSION"]
+    begin
+      ENV.delete("KAMAL_VERSION")
+      none = Rails.application.config.x.stub(:release, nil) { config.cache_key }
+      ENV["KAMAL_VERSION"] = "abc123"
+      kamal = Rails.application.config.x.stub(:release, nil) { config.cache_key }
+      ENV["KAMAL_VERSION"] = "def456"
+      kamal2 = Rails.application.config.x.stub(:release, nil) { config.cache_key }
+      explicit_a = Rails.application.config.x.stub(:release, "r1") { config.cache_key }
+      ENV["KAMAL_VERSION"] = "abc123"
+      explicit_b = Rails.application.config.x.stub(:release, "r1") { config.cache_key }
+
+      refute_equal none, kamal
+      refute_equal kamal, kamal2
+      assert_equal explicit_a, explicit_b
+    ensure
+      original ? ENV["KAMAL_VERSION"] = original : ENV.delete("KAMAL_VERSION")
+    end
+  end
+
+  test "route changes change the key even when x.release is set" do
+    config = OpenApiGenerator::Configuration.new
+    config.ignored_paths = []
+    route = ->(path) { [ OpenApiGenerator::RouteDiscovery::RouteInfo.new("GET", path, "api/widgets", "index") ] }
+
+    first = Rails.application.config.x.stub(:release, "r1") do
+      OpenApiGenerator::RouteDiscovery.stub(:call, route.call("/api/a")) { config.cache_key }
+    end
+    config.instance_variable_set(:@route_digest, nil)
+    second = Rails.application.config.x.stub(:release, "r1") do
+      OpenApiGenerator::RouteDiscovery.stub(:call, route.call("/api/b")) { config.cache_key }
+    end
+
+    refute_equal first, second
+  end
+
   test "the default key falls back to a digest of the route set" do
     config = OpenApiGenerator::Configuration.new
     config.ignored_paths = []
-    route = ->(path) { [OpenApiGenerator::RouteDiscovery::RouteInfo.new("GET", path, "api/widgets", "index")] }
+    route = ->(path) { [ OpenApiGenerator::RouteDiscovery::RouteInfo.new("GET", path, "api/widgets", "index") ] }
 
     first = OpenApiGenerator::RouteDiscovery.stub(:call, route.call("/api/a")) { config.cache_key }
     config.instance_variable_set(:@route_digest, nil)
@@ -170,7 +208,7 @@ class OpenApiGeneratorRouteDiscoveryTest < ActiveSupport::TestCase
     config = OpenApiGenerator::Configuration.new
     route = Route.new({ controller: "api/widgets", action: "index" }, "GET$", Path.new(PathSpec.new("/api/widgets(.:format)")))
 
-    results = OpenApiGenerator::RouteDiscovery.extract_routes([route], config)
+    results = OpenApiGenerator::RouteDiscovery.extract_routes([ route ], config)
 
     assert_equal 1, results.size
     info = results.first
@@ -182,10 +220,10 @@ class OpenApiGeneratorRouteDiscoveryTest < ActiveSupport::TestCase
 
   test "honors ignored paths" do
     config = OpenApiGenerator::Configuration.new
-    config.ignored_paths = [/^\/internal/]
+    config.ignored_paths = [ /^\/internal/ ]
     route = Route.new({ controller: "api/widgets", action: "index" }, "GET$", Path.new(PathSpec.new("/internal/widgets")))
 
-    results = OpenApiGenerator::RouteDiscovery.extract_routes([route], config)
+    results = OpenApiGenerator::RouteDiscovery.extract_routes([ route ], config)
 
     assert_empty results
   end
@@ -236,9 +274,9 @@ class OpenApiGeneratorModelSchemaTest < ActiveSupport::TestCase
     schema = OpenApiGenerator::ModelSchema.schema_for(
       model,
       writable: true,
-      except: [:info],
-      required: [:name],
-      arrays: [:name]
+      except: [ :info ],
+      required: [ :name ],
+      arrays: [ :name ]
     )
 
     assert_equal %w[name], schema[:required]
@@ -254,20 +292,20 @@ class OpenApiGeneratorInputSpecTest < ActiveSupport::TestCase
   test "parses required and array fields into params and schema" do
     spec = OpenApiGenerator::InputSpec.new(
       action: :create,
-      permit: { title: :string!, tags: [:string] }
+      permit: { title: :string!, tags: [ :string ] }
     )
-    params = ActionController::Parameters.new(title: "Hello", tags: ["one"], ignored: "no")
+    params = ActionController::Parameters.new(title: "Hello", tags: [ "one" ], ignored: "no")
 
-    assert_equal({ title: "Hello", tags: ["one"] }, spec.permit(params))
+    assert_equal({ title: "Hello", tags: [ "one" ] }, spec.permit(params))
     assert_equal({ type: "string" }, spec.schema[:properties]["title"])
     assert_equal({ type: "array", items: { type: "string" } }, spec.schema[:properties]["tags"])
-    assert_equal ["title"], spec.schema[:required]
+    assert_equal [ "title" ], spec.schema[:required]
   end
 
   test "raises parameter missing when the wrapper key is not an object" do
     spec = OpenApiGenerator::InputSpec.new(action: :create, wrapped_in: :user, permit: { name: :string })
 
-    ["foo", ["foo"]].each do |value|
+    [ "foo", [ "foo" ] ].each do |value|
       params = ActionController::Parameters.new(user: value)
 
       error = assert_raises(ActionController::ParameterMissing) { spec.permit(params) }
@@ -297,17 +335,17 @@ class OpenApiGeneratorInputSpecTest < ActiveSupport::TestCase
     spec = OpenApiGenerator::InputSpec.new(
       action: :create,
       permit: {
-        detail: { note: :string, purposes: [:string] },
-        targets: [[ target_id: :uuid!, role: :string ]]
+        detail: { note: :string, purposes: [ :string ] },
+        targets: [ [ target_id: :uuid!, role: :string ] ]
       }
     )
     params = ActionController::Parameters.new(
-      detail: { note: "note", purposes: ["food"], ignored: "no" },
-      targets: [{ target_id: "1", role: "subject", ignored: "no" }]
+      detail: { note: "note", purposes: [ "food" ], ignored: "no" },
+      targets: [ { target_id: "1", role: "subject", ignored: "no" } ]
     )
 
     assert_equal(
-      { detail: { note: "note", purposes: ["food"] }, targets: [{ target_id: "1", role: "subject" }] },
+      { detail: { note: "note", purposes: [ "food" ] }, targets: [ { target_id: "1", role: "subject" } ] },
       spec.permit(params)
     )
     assert_equal "object", spec.schema[:properties]["detail"][:type]
@@ -324,8 +362,8 @@ class OpenApiGeneratorRequiredSchemaTest < ActiveSupport::TestCase
         title: :string!,
         "actor!": { kind: :string!, email: :string },
         detail: { note: :string!, extra: :string },
-        targets: [[ target_id: :uuid!, role: :string ]],
-        "lines!": [[ sku: :string!, quantity: :integer ]]
+        targets: [ [ target_id: :uuid!, role: :string ] ],
+        "lines!": [ [ sku: :string!, quantity: :integer ] ]
       }
     )
     schema = spec.schema
@@ -342,11 +380,11 @@ class OpenApiGeneratorRequiredSchemaTest < ActiveSupport::TestCase
   test "permit returns values for required-marked nested and array keys with enforcement off" do
     spec = OpenApiGenerator::InputSpec.new(
       action: :create,
-      permit: { "actor!": { kind: :string! }, "lines!": [[ sku: :string! ]] }
+      permit: { "actor!": { kind: :string! }, "lines!": [ [ sku: :string! ] ] }
     )
-    params = ActionController::Parameters.new(actor: { kind: "x", ignored: 1 }, lines: [{ sku: "a" }])
+    params = ActionController::Parameters.new(actor: { kind: "x", ignored: 1 }, lines: [ { sku: "a" } ])
 
-    assert_equal({ actor: { kind: "x" }, lines: [{ sku: "a" }] }, spec.permit(params))
+    assert_equal({ actor: { kind: "x" }, lines: [ { sku: "a" } ] }, spec.permit(params))
   end
 
   test "omits required when nothing is marked" do
@@ -441,22 +479,22 @@ class OpenApiGeneratorSpecBuilderTest < ActiveSupport::TestCase
     config.ignored_paths = []
     config.ignored_controllers = []
     config.cache_enabled = false
-    config.servers = [{ url: "/api" }]
+    config.servers = [ { url: "/api" } ]
     config.security_schemes = { bearerAuth: { type: "http", scheme: "bearer" } }
-    config.security = [{ bearerAuth: [] }]
+    config.security = [ { bearerAuth: [] } ]
 
-    spec = OpenApiGenerator::RouteDiscovery.stub(:call, [route]) do
+    spec = OpenApiGenerator::RouteDiscovery.stub(:call, [ route ]) do
       OpenApiGenerator::SpecBuilder.call(config: config)
     end
 
     operation = spec[:paths]["/api/widgets/{id}"]["get"]
     assert_equal "Dummy API", spec[:info][:title]
     assert_equal "2.0.0", spec[:info][:version]
-    assert_equal [{ url: "/api" }], spec[:servers]
+    assert_equal [ { url: "/api" } ], spec[:servers]
     assert_equal({ bearerAuth: { type: "http", scheme: "bearer" } }, spec[:components][:securitySchemes])
-    assert_equal [{ bearerAuth: [] }], spec[:security]
+    assert_equal [ { bearerAuth: [] } ], spec[:security]
     assert_equal "Fetch a widget", operation[:summary]
-    assert_equal ["Widgets"], operation[:tags]
+    assert_equal [ "Widgets" ], operation[:tags]
     assert_equal "get_widget", operation[:operationId]
     assert_equal "id", operation[:parameters].first[:name]
   end
@@ -465,9 +503,9 @@ class OpenApiGeneratorSpecBuilderTest < ActiveSupport::TestCase
     route = OpenApiGenerator::RouteDiscovery::RouteInfo.new("GET", "/api/gadgets", "api/gadgets", "index")
     config = OpenApiGenerator::Configuration.new
     config.ignored_paths = []
-    config.included_base_controllers = ["Api::AuthenticatedBaseController"]
+    config.included_base_controllers = [ "Api::AuthenticatedBaseController" ]
 
-    spec = OpenApiGenerator::RouteDiscovery.stub(:call, [route]) do
+    spec = OpenApiGenerator::RouteDiscovery.stub(:call, [ route ]) do
       OpenApiGenerator::SpecBuilder.call(config: config)
     end
 
@@ -478,9 +516,9 @@ class OpenApiGeneratorSpecBuilderTest < ActiveSupport::TestCase
     route = OpenApiGenerator::RouteDiscovery::RouteInfo.new("GET", "/api/widgets", "api/widgets", "index")
     config = OpenApiGenerator::Configuration.new
     config.ignored_paths = []
-    config.security = [{ bearerAuth: [] }]
+    config.security = [ { bearerAuth: [] } ]
 
-    spec = OpenApiGenerator::RouteDiscovery.stub(:call, [route]) do
+    spec = OpenApiGenerator::RouteDiscovery.stub(:call, [ route ]) do
       OpenApiGenerator::SpecBuilder.call(config: config)
     end
 
@@ -491,9 +529,9 @@ class OpenApiGeneratorSpecBuilderTest < ActiveSupport::TestCase
     route = OpenApiGenerator::RouteDiscovery::RouteInfo.new("POST", "/api/gadgets", "api/gadgets", "create")
     config = OpenApiGenerator::Configuration.new
     config.ignored_paths = []
-    config.included_base_controllers = ["Api::AuthenticatedBaseController"]
+    config.included_base_controllers = [ "Api::AuthenticatedBaseController" ]
 
-    spec = OpenApiGenerator::RouteDiscovery.stub(:call, [route]) do
+    spec = OpenApiGenerator::RouteDiscovery.stub(:call, [ route ]) do
       OpenApiGenerator::SpecBuilder.call(config: config)
     end
 
@@ -540,9 +578,9 @@ class OpenApiGeneratorSpecBuilderTest < ActiveSupport::TestCase
     route = OpenApiGenerator::RouteDiscovery::RouteInfo.new("POST", "/api/gadgets", "api/gadgets", "create")
     config = OpenApiGenerator::Configuration.new
     config.ignored_paths = []
-    config.included_base_controllers = ["Api::AuthenticatedBaseController"]
+    config.included_base_controllers = [ "Api::AuthenticatedBaseController" ]
 
-    spec = OpenApiGenerator::RouteDiscovery.stub(:call, [route]) do
+    spec = OpenApiGenerator::RouteDiscovery.stub(:call, [ route ]) do
       OpenApiGenerator::SpecBuilder.call(config: config)
     end
 
@@ -559,7 +597,7 @@ class OpenApiGeneratorSpecBuilderTest < ActiveSupport::TestCase
     ]
     config = OpenApiGenerator::Configuration.new
     config.ignored_paths = []
-    config.included_base_controllers = ["Api::AuthenticatedBaseController"]
+    config.included_base_controllers = [ "Api::AuthenticatedBaseController" ]
 
     offenses = OpenApiGenerator::RouteDiscovery.stub(:call, routes) do
       OpenApiGenerator::Completeness.audit(config: config)
@@ -572,7 +610,7 @@ class OpenApiGeneratorSpecBuilderTest < ActiveSupport::TestCase
   end
 
   test "audit skips ignored controllers unless include_ignored is true" do
-    routes = [OpenApiGenerator::RouteDiscovery::RouteInfo.new("POST", "/api/hidden_things", "api/hidden_things", "create")]
+    routes = [ OpenApiGenerator::RouteDiscovery::RouteInfo.new("POST", "/api/hidden_things", "api/hidden_things", "create") ]
     config = OpenApiGenerator::Configuration.new
     config.ignored_paths = []
 
@@ -582,21 +620,30 @@ class OpenApiGeneratorSpecBuilderTest < ActiveSupport::TestCase
     end
 
     assert_empty default
-    assert_equal ["Api::HiddenThingsController"], audited.map(&:controller)
+    assert_equal [ "Api::HiddenThingsController" ], audited.map(&:controller)
     assert_equal "/api/hidden_things", audited.first.path
   end
 
   test "permitted filters wrapped input params" do
     controller = Api::GadgetsController.new
     controller.params = ActionController::Parameters.new(
-      gadget: { title: "Hello", description: "Details", label_ids: ["a"], ignored: "no" },
+      gadget: { title: "Hello", description: "Details", label_ids: [ "a" ], ignored: "no" },
       ignored: "no"
     )
 
     assert_equal(
-      { title: "Hello", description: "Details", label_ids: ["a"] },
-      controller.permitted(:create)
+      { title: "Hello", description: "Details", label_ids: [ "a" ] },
+      controller.send(:permitted, :create)
     )
+  end
+
+  test "DSL helpers are not controller actions" do
+    names = Api::GadgetsController.action_methods
+    assert_includes names, "create"
+    assert_empty names.select { |n| n == "permitted" || n.start_with?("open_api_generator_") }
+    assert_empty Api::GadgetsController.instance_methods.grep(/open_api_generator_/).grep_v(/_(path|url)\z/) # engine mount route helpers aside
+    assert_not Api::GadgetsController.new.respond_to?(:open_api_generator_action_docs)
+    assert_not Api::GadgetsController.new.respond_to?(:permitted)
   end
 
   test "returns controller metadata for route introspection" do
@@ -605,7 +652,7 @@ class OpenApiGeneratorSpecBuilderTest < ActiveSupport::TestCase
     config.ignored_paths = []
     config.ignored_controllers = []
 
-    entries = OpenApiGenerator::RouteDiscovery.stub(:call, [route]) do
+    entries = OpenApiGenerator::RouteDiscovery.stub(:call, [ route ]) do
       OpenApiGenerator::SpecBuilder.route_introspection(config: config)
     end
 
@@ -616,7 +663,7 @@ class OpenApiGeneratorSpecBuilderTest < ActiveSupport::TestCase
     assert_equal "GET", entry[:verb]
     assert_equal "/api/widgets/:id", entry[:rails_path]
     assert_equal "/api/widgets/{id}", entry[:open_api_path]
-    assert_equal [{ name: "id", in: "path" }], entry[:required_parameters]
+    assert_equal [ { name: "id", in: "path" } ], entry[:required_parameters]
     assert_empty entry[:optional_parameters]
   end
 end
@@ -625,7 +672,7 @@ class OpenApiGeneratorRakeTaskTest < ActiveSupport::TestCase
   setup do
     @rake = Rake::Application.new
     Rake.application = @rake
-    @rake.define_task(Rake::Task, :environment) {}
+    @rake.define_task(Rake::Task, :environment) { }
     load File.expand_path("../lib/tasks/open_api_generator_tasks.rake", __dir__)
   end
 
@@ -688,7 +735,7 @@ class OpenApiGeneratorResponseSchemaTest < ActiveSupport::TestCase
 
   def build(controller, action, config: OpenApiGenerator::Configuration.new, registry: OpenApiGenerator::SchemaRegistry.new)
     responses = OpenApiGenerator::ResponseBuilder.build(config, controller, action, {}, registry)
-    [responses, registry.to_h]
+    [ responses, registry.to_h ]
   end
 
   def schema_of(responses)
@@ -711,19 +758,19 @@ class OpenApiGeneratorResponseSchemaTest < ActiveSupport::TestCase
     config = OpenApiGenerator::Configuration.new
     assert_equal [], config.response_column_denylist
 
-    config.response_column_denylist = ["a", /token/, :b]
-    assert_equal ["a", /token/, "b"], config.response_column_denylist
+    config.response_column_denylist = [ "a", /token/, :b ]
+    assert_equal [ "a", /token/, "b" ], config.response_column_denylist
     assert config.response_column_denied?("a")
     assert config.response_column_denied?("api_token_digest")
     refute config.response_column_denied?("title")
 
-    assert_raises(ArgumentError) { config.response_column_denylist = [1] }
-    assert_raises(ArgumentError) { config.response_column_denylist = [nil] }
+    assert_raises(ArgumentError) { config.response_column_denylist = [ 1 ] }
+    assert_raises(ArgumentError) { config.response_column_denylist = [ nil ] }
   end
 
   test "the denylist filters the model fallback only" do
     config = OpenApiGenerator::Configuration.new
-    config.response_column_denylist = [/\Adesc/]
+    config.response_column_denylist = [ /\Adesc/ ]
     controller = controller_with { api_response :show, model: Gadget }
 
     responses, schemas = build(controller, :show, config: config)
@@ -734,24 +781,24 @@ class OpenApiGeneratorResponseSchemaTest < ActiveSupport::TestCase
 
   test "the denylist never filters serializer schemas" do
     config = OpenApiGenerator::Configuration.new
-    config.response_column_denylist = ["title"]
+    config.response_column_denylist = [ "title" ]
     serializer = Class.new do
       def self.name = "GadgetSerializer"
       def self.open_api_schema = { type: "object", properties: { title: { type: "string" } } }
     end
     controller = controller_with { api_response :show, serializer: serializer }
     _responses, schemas = build(controller, :show, config: config)
-    assert_equal [:title], schemas["Gadget"][:properties].keys
+    assert_equal [ :title ], schemas["Gadget"][:properties].keys
   end
 
   test "the denylist never filters request schemas built through SpecBuilder" do
     route = OpenApiGenerator::RouteDiscovery::RouteInfo.new("POST", "/api/gadgets", "api/gadgets", "create")
     config = OpenApiGenerator::Configuration.new
     config.ignored_paths = []
-    config.included_base_controllers = ["Api::AuthenticatedBaseController"]
-    config.response_column_denylist = ["title", "description"]
+    config.included_base_controllers = [ "Api::AuthenticatedBaseController" ]
+    config.response_column_denylist = [ "title", "description" ]
 
-    spec = OpenApiGenerator::RouteDiscovery.stub(:call, [route]) do
+    spec = OpenApiGenerator::RouteDiscovery.stub(:call, [ route ]) do
       OpenApiGenerator::SpecBuilder.call(config: config)
     end
 
@@ -761,7 +808,7 @@ class OpenApiGeneratorResponseSchemaTest < ActiveSupport::TestCase
 
   test "a model reused across actions registers one schema" do
     config = OpenApiGenerator::Configuration.new
-    config.response_column_denylist = ["description"]
+    config.response_column_denylist = [ "description" ]
     controller = controller_with do
       api_response :index, model: Gadget, collection: true
       api_response :show, model: Gadget
@@ -784,7 +831,7 @@ class OpenApiGeneratorResponseSchemaTest < ActiveSupport::TestCase
     assert_equal({ "$ref" => "#/components/schemas/Gadget" }, schema_of(responses))
     responses, = build(controller, :index)
     assert_equal({ type: "array", items: { "$ref" => "#/components/schemas/Gadget" } }, schema_of(responses))
-    assert_equal ["Gadget"], schemas.keys
+    assert_equal [ "Gadget" ], schemas.keys
   end
 
   test "envelope data wraps a model schema" do
@@ -799,10 +846,10 @@ class OpenApiGeneratorResponseSchemaTest < ActiveSupport::TestCase
     schemas = registry.to_h
 
     assert_equal({ "$ref" => "#/components/schemas/GadgetEnvelope" }, schema_of(show))
-    assert_equal({ type: "object", properties: { data: { "$ref" => "#/components/schemas/Gadget" } }, required: ["data"] }, schemas["GadgetEnvelope"])
+    assert_equal({ type: "object", properties: { data: { "$ref" => "#/components/schemas/Gadget" } }, required: [ "data" ] }, schemas["GadgetEnvelope"])
     assert_equal({ "$ref" => "#/components/schemas/GadgetListEnvelope" }, schema_of(index))
     assert_equal(
-      { type: "object", properties: { data: { type: "array", items: { "$ref" => "#/components/schemas/Gadget" } }, meta: { type: "object" } }, required: ["data"] },
+      { type: "object", properties: { data: { type: "array", items: { "$ref" => "#/components/schemas/Gadget" } }, meta: { type: "object" } }, required: [ "data" ] },
       schemas["GadgetListEnvelope"]
     )
   end
@@ -886,5 +933,76 @@ class OpenApiGeneratorResponseSchemaTest < ActiveSupport::TestCase
 
   test "api_response rejects an unknown envelope" do
     assert_raises(ArgumentError) { controller_with { api_response :show, model: Gadget, envelope: :wrap } }
+  end
+end
+
+class OpenApiGeneratorScalarOverridesTest < ActiveSupport::TestCase
+  ID = { type: "string", pattern: "^[0-9a-z]{25}$" }.freeze
+
+  setup { @original = OpenApiGenerator.config.scalar_overrides }
+  teardown { OpenApiGenerator.config.scalar_overrides = @original }
+
+  test "defaults to a frozen empty hash and leaves built-in scalars alone" do
+    assert_equal({}, OpenApiGenerator::Configuration.new.scalar_overrides)
+    assert OpenApiGenerator::Configuration.new.scalar_overrides.frozen?
+    assert_equal({ type: "string", format: "uuid" }, OpenApiGenerator::TypeMapper.scalar(:uuid))
+  end
+
+  test "the writer freezes overrides recursively" do
+    config = OpenApiGenerator::Configuration.new
+    config.scalar_overrides = { uuid: { type: "string", enum: [ "a" ], nested: { k: "v" } } }
+    override = config.scalar_overrides[:uuid]
+
+    assert override.frozen?
+    assert override[:enum].frozen?
+    assert override[:nested].frozen?
+    assert override[:type].frozen?
+  end
+
+  test "TypeMapper, ModelSchema and InputSpec use the config they are given, not only the global" do
+    private_config = OpenApiGenerator::Configuration.new
+    private_config.scalar_overrides = { string: ID }
+    spec = OpenApiGenerator::InputSpec.new(action: :create, permit: { title: :string!, tags: [ :string ] })
+
+    assert_equal ID, OpenApiGenerator::TypeMapper.scalar(:string, private_config)
+    assert_equal({ type: "string" }, OpenApiGenerator::TypeMapper.scalar(:string))
+    assert_equal ID, spec.schema(private_config)[:properties]["title"]
+    assert_equal({ type: "array", items: ID }, spec.schema(private_config)[:properties]["tags"])
+    assert_equal({ type: "string" }, spec.schema[:properties]["title"])
+    schema = OpenApiGenerator::ModelSchema.schema_for(OpenApiGeneratorModelSchemaTest::DummyModel, config: private_config)
+    assert_equal ID, schema[:properties]["name"]
+  end
+
+  test "SpecBuilder.call(config:) applies that config's overrides to request bodies" do
+    private_config = OpenApiGenerator::Configuration.new
+    private_config.ignored_paths = []
+    private_config.included_base_controllers = [ "Api::AuthenticatedBaseController" ]
+    private_config.scalar_overrides = { string: ID }
+    route = OpenApiGenerator::RouteDiscovery::RouteInfo.new("POST", "/api/gadgets", "api/gadgets", "create")
+
+    spec = OpenApiGenerator::RouteDiscovery.stub(:call, [ route ]) do
+      OpenApiGenerator::SpecBuilder.call(config: private_config)
+    end
+    assert_equal ID, spec[:components][:schemas]["GadgetCreateRequest"][:properties]["title"]
+  end
+
+  test "an override replaces the scalar and is not mutated by callers" do
+    OpenApiGenerator.config.scalar_overrides = { "uuid" => ID }
+
+    assert_equal ID, OpenApiGenerator::TypeMapper.scalar(:uuid)
+    assert_equal({ type: "array", items: ID }, OpenApiGenerator::TypeMapper.array(:uuid))
+    OpenApiGenerator::TypeMapper.scalar(:uuid)[:x] = 1
+    assert_equal ID, OpenApiGenerator::TypeMapper.scalar(:uuid)
+    assert_equal({ type: "string" }, OpenApiGenerator::TypeMapper.scalar(:string))
+  end
+end
+
+
+class OpenApiGeneratorPermittedRequestTest < ActionDispatch::IntegrationTest
+  test "a request exercises private permitted with the default action_name" do
+    post "/api/gadgets", params: { gadget: { title: "Hi", ignored: "no" } }, as: :json
+
+    assert_response :success
+    assert_equal({ "title" => "Hi" }, response.parsed_body)
   end
 end

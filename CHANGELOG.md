@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- DSL class attributes (`open_api_generator_*`) no longer define instance readers, and
+  `permitted` is private, so none of them is a routable controller action. Call `permitted` from
+  inside the controller (implicit receiver); tests use `controller.send(:permitted, ...)`.
+- Add `Configuration#scalar_overrides` (default `{}`, frozen): per-type schemas consulted before the
+  built-in scalar map by `TypeMapper.scalar` (using the config given to `SpecBuilder.call(config:)`, deeply frozen), so they cover `api_params` tokens and model schemas.
+- The default cache key discriminator is now a digest of the release marker (`x.release`, else
+  `ENV["KAMAL_VERSION"]`) joined with the route digest, so a Kamal deploy changes the key
+  without host configuration.
 - `swagger :action, tool_name: true` sets `x-tool-name` to the operation's generated `operationId`, for an
   action routed more than once (a string `tool_name:` would give every route the same name). Strings are unchanged.
 - Add `Configuration#response_column_denylist` (default `[]`; Strings and Regexps, anything else

@@ -4,7 +4,7 @@ module OpenApiGenerator
   class ModelSchema
     DEFAULT_EXCLUDED_COLUMNS = %w[id created_at updated_at].freeze
 
-    def self.schema_for(model_class, only_columns: nil, writable: false, except: [], required: nil, arrays: [])
+    def self.schema_for(model_class, only_columns: nil, writable: false, except: [], required: nil, arrays: [], config: OpenApiGenerator.config)
       return { type: "object" } unless model_class&.respond_to?(:columns_hash)
 
       columns = select_columns(model_class.columns_hash, only_columns)
@@ -18,9 +18,9 @@ module OpenApiGenerator
       inferred_required = []
       columns.each do |column_name, column|
         properties[column_name] = if array_columns.include?(column_name.to_s)
-          TypeMapper.array(column.type)
+          TypeMapper.array(column.type, config)
         else
-          column_schema(column, model_class, column_name)
+          column_schema(column, model_class, column_name, config)
         end
         inferred_required << column_name unless column.null
       end
@@ -37,10 +37,10 @@ module OpenApiGenerator
       columns_hash.select { |name, _| only_columns.map(&:to_s).include?(name.to_s) }
     end
 
-    def self.column_schema(column, model_class, column_name)
+    def self.column_schema(column, model_class, column_name, config = OpenApiGenerator.config)
       return enum_schema(model_class, column_name) if enum_column?(model_class, column_name)
 
-      TypeMapper.scalar(column.type)
+      TypeMapper.scalar(column.type, config)
     end
 
     def self.enum_column?(model_class, column_name)
@@ -51,8 +51,8 @@ module OpenApiGenerator
       { type: "string", enum: model_class.defined_enums[column_name.to_s].keys }
     end
 
-    def self.type_schema(column_type)
-      TypeMapper.scalar(column_type)
+    def self.type_schema(column_type, config = OpenApiGenerator.config)
+      TypeMapper.scalar(column_type, config)
     end
   end
 end

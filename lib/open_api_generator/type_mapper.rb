@@ -19,12 +19,16 @@ module OpenApiGenerator
       jsonb: { type: "object" }
     }.freeze
 
-    def self.scalar(type)
-      SCALARS.fetch(type.to_sym, { type: "string" }).dup
+    # @param config [Configuration] source of `scalar_overrides` (the one passed to
+    #   `SpecBuilder.call(config:)`, defaulting to the global)
+    def self.scalar(type, config = OpenApiGenerator.config)
+      key = type.to_sym
+      override = config.scalar_overrides[key]
+      (override || SCALARS.fetch(key, { type: "string" })).dup
     end
 
-    def self.array(inner_type)
-      { type: "array", items: scalar(inner_type) }
+    def self.array(inner_type, config = OpenApiGenerator.config)
+      { type: "array", items: scalar(inner_type, config) }
     end
   end
 end

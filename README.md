@@ -85,8 +85,9 @@ class-level default with `self.open_api_generator_response_envelope = :data` (in
 ### Caching
 
 The generated spec is cached for `config.cache_ttl` (not in development). The default
-`cache_key` carries a discriminator: `Rails.application.config.x.release` when set,
-otherwise a digest of the route set (verb, path, controller, action only, so changes to `swagger`/`api_params`/`api_response`/serializers alone are not seen; set `x.release` from the deploy revision). A host-set `config.cache_key` is used verbatim.
+`cache_key` carries a discriminator: a digest of the release marker (`Rails.application.config.x.release`, else the `KAMAL_VERSION` environment variable Kamal sets on deploy) joined with a digest of the route set (verb, path, controller, action only, so changes to `swagger`/`api_params`/`api_response`/serializers alone are not seen; with no release marker such a deploy can serve a stale spec for up to `cache_ttl`). A host-set `config.cache_key` is used verbatim.
+
+`config.scalar_overrides = { uuid: { type: "string", pattern: "..." } }` replaces the schema for a scalar type everywhere `TypeMapper.scalar` is used (`api_params` tokens and model schemas).
 A failed build is never cached; with no earlier entry the error propagates.
 
 ## Installation
