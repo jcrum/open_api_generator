@@ -23,6 +23,31 @@ module OpenApiGenerator
       end
     end
 
+    # Lists routed path params named `id` or `*_id` (never `orgslug`) that no
+    # `api_path_param` declaration (honoring `within:`) and no explicit swagger
+    # `in: path` parameter types. Host tests assert it is empty so a new route cannot ship
+    # an untyped identifier.
+    #
+    # @return [Array<String>] "VERB /path {name} (Controller#action)" strings
+    def self.undeclared_path_params(config:, include_ignored: false)
+      operations = SpecBuilder.__send__(:discover_operations, config, include_ignored: include_ignored)
+
+      operations.flat_map do |operation|
+        names = SpecBuilder.path_param_names(operation[:path])
+        explicit = Array(operation[:docs][:parameters]).filter_map do |param|
+          SpecBuilder.parameter_field(param, :name).to_s if SpecBuilder.parameter_field(param, :in).to_s == "path"
+        end
+
+        names.filter_map do |name|
+          next unless name == "id" || name.end_with?("_id")
+          next if explicit.include?(name)
+          next if SpecBuilder.path_param_declared?(operation[:controller_class], name, operation[:path])
+
+          "#{operation[:verb].to_s.upcase} #{operation[:path]} {#{name}} (#{operation[:controller]}##{operation[:action]})"
+        end
+      end.uniq
+    end
+
     # Lists documented operations that the host routes do not serve as documented
     # (for example an engine documented without a mount point). Each documented
     # operation's path is filled with sample values and recognized against

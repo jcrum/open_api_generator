@@ -31,6 +31,22 @@ without an `api_params` declaration. Controllers in `swagger_ignore!` mode are s
 unless you pass `include_ignored: true`, which audits hidden controllers (for example
 machine-only endpoints) for request bodies too.
 
+### Typed path parameters
+
+Path params default to `{ type: string }`. Declare their schema per controller:
+
+```ruby
+api_path_param :id, :uuid                                   # scalar_overrides[:uuid]
+api_path_param :id, :integer, within: :board_id             # /boards/{board_id}/cards/{id}
+api_path_param :kind, :string, enum: %w[a b], pattern: "^[ab]$"
+```
+
+Types are `:uuid`, `:string` and `:integer`. The declaration with the most matching `within:`
+params wins; two equally specific matches raise `ArgumentError`. An explicit swagger
+`in: path` parameter overrides the generated one, and an explicit non-path parameter named like
+a path param on the same route is dropped. `Completeness.undeclared_path_params(config:)`
+lists routed `id`/`*_id` params that are still untyped; host tests assert it is empty.
+
 ### Reachability guard
 
 `OpenApiGenerator::Completeness.unreachable(config:, samples: {})` fills each documented

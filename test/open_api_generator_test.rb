@@ -1006,3 +1006,161 @@ class OpenApiGeneratorPermittedRequestTest < ActionDispatch::IntegrationTest
     assert_equal({ "title" => "Hi" }, response.parsed_body)
   end
 end
+
+class OpenApiGeneratorPathParamTest < ActiveSupport::TestCase
+  def controller(&block)
+    klass = Class.new(ActionController::API)
+    klass.include OpenApiGenerator::ControllerDSL
+    klass.class_eval(&block) if block
+    klass
+  end
+
+  def params_for(klass, path, docs = {}, config = OpenApiGenerator::Configuration.new)
+    OpenApiGenerator::SpecBuilder.build_parameters(path, docs, klass, config)
+  end
+
+  def schema(params, name)
+    params.find { |param| param[:name] == name }[:schema]
+  end
+
+  test "undeclared path params stay plain strings" do
+    assert_equal({ type: "string" }, schema(params_for(controller, "/things/{id}"), "id"))
+  end
+
+  test "declared types map through scalar overrides, enum and pattern" do
+    config = OpenApiGenerator::Configuration.new
+    config.scalar_overrides = { uuid: { type: "string", pattern: "^[0-9a-z]{25}$" } }
+    klass = controller do
+      api_path_param :id, :uuid
+      api_path_param :number, :integer
+      api_path_param :kind, :string, enum: %w[a b], pattern: "^[ab]$"
+    end
+    params = params_for(klass, "/things/{id}/{number}/{kind}", {}, config)
+
+    assert_equal({ type: "string", pattern: "^[0-9a-z]{25}$" }, schema(params, "id"))
+    assert_equal({ type: "integer" }, schema(params, "number"))
+    assert_equal({ type: "string", enum: %w[a b], pattern: "^[ab]$" }, schema(params, "kind"))
+  end
+
+  test "types other than uuid, string and integer raise" do
+    assert_raises(ArgumentError) { controller { api_path_param :id, :decimal } }
+  end
+
+  test "within selects the declaration for routes that have the named param" do
+    klass = controller do
+      api_path_param :id, :uuid
+      api_path_param :id, :integer, within: :board_id
+    end
+
+    assert_equal "uuid", schema(params_for(klass, "/cards/{id}"), "id")[:format]
+    assert_equal({ type: "integer" }, schema(params_for(klass, "/boards/{board_id}/cards/{id}"), "id"))
+  end
+
+  test "equally specific matches raise and the most specific wins" do
+    ambiguous = controller do
+      api_path_param :id, :string, within: :a_id
+      api_path_param :id, :integer, within: :b_id
+    end
+    assert_raises(ArgumentError) { params_for(ambiguous, "/a/{a_id}/b/{b_id}/x/{id}") }
+
+    specific = controller do
+      api_path_param :id, :string, within: :a_id
+      api_path_param :id, :integer, within: %i[a_id b_id]
+    end
+    assert_equal({ type: "integer" }, schema(params_for(specific, "/a/{a_id}/b/{b_id}/x/{id}"), "id"))
+  end
+
+  test "a subclass redeclaration replaces the same name and within without touching the parent" do
+    parent = controller { api_path_param :id, :integer }
+    child = Class.new(parent) { api_path_param :id, :string }
+
+    assert_equal({ type: "integer" }, schema(params_for(parent, "/x/{id}"), "id"))
+    assert_equal({ type: "string" }, schema(params_for(child, "/x/{id}"), "id"))
+  end
+
+  test "an explicit non-path param colliding with a path param is dropped" do
+    docs = { parameters: [ { name: "board_id", in: "query", schema: { type: "string", pattern: "x" } }, { name: "q", in: "query", schema: { type: "string" } } ] }
+    params = params_for(controller, "/boards/{board_id}/cards", docs)
+
+    assert_equal [ [ "board_id", "path" ], [ "q", "query" ] ], params.map { |param| [ param[:name], param[:in] ] }
+    assert_equal({ type: "string" }, schema(params, "board_id"))
+  end
+
+  test "an explicit in: path entry overrides the generated and declared one" do
+    klass = controller { api_path_param :id, :integer }
+    docs = { parameters: [ { name: "id", in: "path", required: true, schema: { type: "string", enum: %w[me] } } ] }
+    params = params_for(klass, "/x/{id}", docs)
+
+    assert_equal 1, params.size
+    assert_equal({ type: "string", enum: %w[me] }, schema(params, "id"))
+  end
+
+  test "build_operation and route introspection use the declarations" do
+    klass = controller { api_path_param :id, :integer }
+    Object.const_set(:PathTypedThingsController, klass)
+    operation = OpenApiGenerator::SpecBuilder.build_operation(OpenApiGenerator.config, klass, "show", "/path_typed_things/{id}", OpenApiGenerator::SchemaRegistry.new, "get")
+
+    assert_equal({ type: "integer" }, operation[:parameters].first[:schema])
+  ensure
+    Object.send(:remove_const, :PathTypedThingsController) if Object.const_defined?(:PathTypedThingsController)
+  end
+
+  test "an explicit in: path override is always required" do
+    docs = { parameters: [ { name: "id", in: "path", schema: { type: "string" } } ] }
+    params = params_for(controller, "/x/{id}", docs)
+
+    assert_equal true, params.first[:required]
+    assert_equal({ type: "string" }, params.first[:schema])
+  end
+
+  test "api_path_param validates its arguments" do
+    assert_raises(ArgumentError) { controller { api_path_param :id, nil } }
+    assert_raises(ArgumentError) { controller { api_path_param :id, :bogus } }
+    assert_raises(ArgumentError) { controller { api_path_param :id, :string, enum: "a" } }
+    assert_raises(ArgumentError) { controller { api_path_param :id, :string, pattern: /a/ } }
+    klass = controller { api_path_param :id, :integer, enum: [ 1, 2 ] }
+    assert_equal %w[1 2], schema(params_for(klass, "/x/{id}"), "id")[:enum]
+  end
+
+  test "path_param_declared? honors within" do
+    klass = controller { api_path_param :id, :integer, within: :board_id }
+
+    assert OpenApiGenerator::SpecBuilder.path_param_declared?(klass, :id, "/boards/{board_id}/cards/{id}")
+    assert_not OpenApiGenerator::SpecBuilder.path_param_declared?(klass, :id, "/cards/{id}")
+  end
+
+  test "undeclared_path_params lists id and *_id params with no declaration or explicit path parameter" do
+    routes = [
+      OpenApiGenerator::RouteDiscovery::RouteInfo.new("GET", "/api/untyped_things/:id", "api/untyped_things", "show"),
+      OpenApiGenerator::RouteDiscovery::RouteInfo.new("GET", "/api/gadgets/:gadget_id/:slug", "api/gadgets", "index"),
+      OpenApiGenerator::RouteDiscovery::RouteInfo.new("GET", "/api/typed_gadgets/:id", "api/typed_gadgets", "show")
+    ]
+    gadgets = Api::GadgetsController
+    original_docs = gadgets.open_api_generator_action_docs
+    typed = Class.new(Api::AuthenticatedBaseController) { api_path_param :id, :uuid }
+    Api.const_set(:TypedGadgetsController, typed)
+    Api.const_set(:UntypedThingsController, Class.new(Api::AuthenticatedBaseController))
+    config = OpenApiGenerator::Configuration.new
+    config.ignored_paths = []
+    config.included_base_controllers = [ "Api::AuthenticatedBaseController" ]
+
+    offenses = OpenApiGenerator::RouteDiscovery.stub(:call, routes) do
+      OpenApiGenerator::Completeness.undeclared_path_params(config: config)
+    end
+
+    assert_equal [
+      "GET /api/untyped_things/{id} {id} (Api::UntypedThingsController#show)",
+      "GET /api/gadgets/{gadget_id}/{slug} {gadget_id} (Api::GadgetsController#index)"
+    ], offenses
+
+    gadgets.swagger :index, parameters: [ { name: "gadget_id", in: "path", required: true, schema: { type: "string" } } ]
+    explicit = OpenApiGenerator::RouteDiscovery.stub(:call, routes) do
+      OpenApiGenerator::Completeness.undeclared_path_params(config: config)
+    end
+    assert_equal [ "GET /api/untyped_things/{id} {id} (Api::UntypedThingsController#show)" ], explicit
+  ensure
+    Api.send(:remove_const, :TypedGadgetsController) if Api.const_defined?(:TypedGadgetsController, false)
+    Api.send(:remove_const, :UntypedThingsController) if Api.const_defined?(:UntypedThingsController, false)
+    gadgets.open_api_generator_action_docs = original_docs if original_docs
+  end
+end

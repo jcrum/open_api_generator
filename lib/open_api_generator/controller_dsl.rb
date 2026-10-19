@@ -31,6 +31,8 @@ module OpenApiGenerator
       base.class_attribute :open_api_generator_ignored_actions, instance_accessor: false, default: Set.new
       base.class_attribute :open_api_generator_input_specs, instance_accessor: false, default: {}
       base.class_attribute :open_api_generator_response_specs, instance_accessor: false, default: {}
+      # Typed path parameters, keyed `[name, within]` (see `api_path_param`).
+      base.class_attribute :open_api_generator_path_params, instance_accessor: false, default: {}
       # Class-level default for `api_response envelope:`. nil and :none mean no envelope;
       # :data wraps bodies as `{ data: ..., meta: ... }`. Inherited; a subclass or a
       # single `api_response envelope:` overrides it.
@@ -85,6 +87,34 @@ module OpenApiGenerator
           model: model
         )
         self.open_api_generator_input_specs = open_api_generator_input_specs.merge(action.to_s => spec)
+      end
+
+      PATH_PARAM_TYPES = %i[uuid string integer].freeze
+
+      # Declares the schema of a path parameter (`{id}`, `{board_id}`) for every route of
+      # this controller (and subclasses) that has a path param of that name. Undeclared path
+      # params stay `{ type: string }`.
+      #
+      # @param type [Symbol] `:uuid` (the configured `scalar_overrides[:uuid]`, base36 ids in
+      #   Paxfish hosts), `:string` or `:integer`; anything else raises
+      # @param within [Symbol, Array<Symbol>] only routes whose path also has these params.
+      #   Use it when one name means different things per route (`/cards/{id}` is a uuid,
+      #   `/boards/{board_id}/cards/{id}` an integer number). The declaration with the most
+      #   matching `within` params wins; two equally specific matches raise `ArgumentError`.
+      # @param enum [Array, nil] allowed values
+      # @param pattern [String, nil] regular expression for the value
+      def api_path_param(name, type = :string, within: [], enum: nil, pattern: nil)
+        type = type.respond_to?(:to_sym) ? type.to_sym : type
+        unless PATH_PARAM_TYPES.include?(type)
+          raise ArgumentError, "api_path_param type must be one of #{PATH_PARAM_TYPES.inspect}, got #{type.inspect}"
+        end
+
+        raise ArgumentError, "api_path_param enum must be an Array, got #{enum.inspect}" unless enum.nil? || enum.is_a?(Array)
+        raise ArgumentError, "api_path_param pattern must be a String, got #{pattern.inspect}" unless pattern.nil? || pattern.is_a?(String)
+
+        within = Array(within).map(&:to_s).sort.freeze
+        entry = { type: type, enum: enum&.map(&:to_s)&.freeze, pattern: pattern }.freeze
+        self.open_api_generator_path_params = open_api_generator_path_params.merge([ name.to_s, within ] => entry)
       end
 
       # Marks this controller to be included in the OpenAPI spec.

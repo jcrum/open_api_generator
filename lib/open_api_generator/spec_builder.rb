@@ -67,6 +67,8 @@ module OpenApiGenerator
           action: route.action,
           verb: route.verb,
           path: convert_path_to_open_api(route.path),
+          controller_class: controller_class,
+          docs: docs,
           has_request_body: request_body_declared?(controller_class, route.action, docs)
         }
       end
@@ -142,7 +144,7 @@ module OpenApiGenerator
       operation = {
         tags: build_tags(controller_class, docs),
         operationId: docs[:operation_id] || default_operation_id(controller_class, action, oas_path, verb),
-        parameters: build_parameters(oas_path, docs),
+        parameters: build_parameters(oas_path, docs, controller_class, config),
         responses: ResponseBuilder.build(config, controller_class, action, docs, registry)
       }
 
@@ -174,7 +176,7 @@ module OpenApiGenerator
 
         oas_path = convert_path_to_open_api(route.path)
         docs = get_action_docs(controller_class, route.action)
-        params = summarize_parameters(oas_path, docs)
+        params = summarize_parameters(oas_path, docs, controller_class, config)
 
         {
           controller: controller_class.name,
@@ -188,10 +190,10 @@ module OpenApiGenerator
       end
     end
 
-    def self.summarize_parameters(oas_path, docs)
+    def self.summarize_parameters(oas_path, docs, controller_class = nil, config = OpenApiGenerator.config)
       summary = { required: [], optional: [] }
 
-      build_parameters(oas_path, docs).each do |param|
+      build_parameters(oas_path, docs, controller_class, config).each do |param|
         name = parameter_field(param, :name)
         location = parameter_field(param, :in) || "query"
         next unless name
@@ -325,13 +327,16 @@ module OpenApiGenerator
     # Builds the parameters array for an operation.
     #
     # Combines path parameters extracted from the route with any
-    # explicitly documented parameters.
+    # explicitly documented parameters. Path params take their schema from the
+    # controller's `api_path_param` declarations (string when undeclared).
     #
     # @param oas_path [String] the OpenAPI-formatted path
     # @param docs [Hash] the action documentation
+    # @param controller_class [Class, nil] the controller, for `api_path_param` lookups
+    # @param config [Configuration] source of `scalar_overrides`
     # @return [Array<Hash>] array of parameter objects
-    def self.build_parameters(oas_path, docs)
-      path_params = extract_path_parameters(oas_path)
+    def self.build_parameters(oas_path, docs, controller_class = nil, config = OpenApiGenerator.config)
+      path_params = extract_path_parameters(oas_path, controller_class, config)
       explicit_params = docs[:parameters] || []
 
       merge_parameters(path_params, explicit_params)
@@ -341,30 +346,82 @@ module OpenApiGenerator
     #
     # @param oas_path [String] the OpenAPI path (e.g., "/users/{id}")
     # @return [Array<Hash>] array of path parameter objects
-    def self.extract_path_parameters(oas_path)
-      oas_path.scan(/\{(\w+)\}/).flatten.map do |param_name|
+    def self.extract_path_parameters(oas_path, controller_class = nil, config = OpenApiGenerator.config)
+      names = path_param_names(oas_path)
+      names.map do |param_name|
         {
           name: param_name,
           in: "path",
           required: true,
-          schema: { type: "string" }
+          schema: path_param_schema(controller_class, param_name, names, config) || { type: "string" }
         }
       end
     end
 
+    def self.path_param_names(oas_path)
+      oas_path.scan(/\{(\w+)\}/).flatten
+    end
+
+    # True when the controller declares a schema for this path param on this path
+    # (`api_path_param`, honoring `within:`).
+    def self.path_param_declared?(controller_class, name, oas_path)
+      !path_param_declaration(controller_class, name.to_s, path_param_names(oas_path)).nil?
+    end
+
+    # The most specific matching declaration, or nil. Equal specificity raises.
+    def self.path_param_declaration(controller_class, name, path_names)
+      return unless controller_class.respond_to?(:open_api_generator_path_params)
+
+      matches = controller_class.open_api_generator_path_params.select do |(declared, within), _entry|
+        declared == name && (within - path_names).empty?
+      end
+      return if matches.empty?
+
+      best = matches.keys.map { |(_, within)| within.size }.max
+      top = matches.select { |(_, within), _| within.size == best }
+      if top.size > 1
+        raise ArgumentError, "ambiguous api_path_param #{name} on #{controller_class.name}: " \
+                             "#{top.keys.map { |(_, within)| within.inspect }.join(' and ')} both match #{path_names.inspect}"
+      end
+
+      top.values.first
+    end
+
+    def self.path_param_schema(controller_class, name, path_names, config)
+      entry = path_param_declaration(controller_class, name, path_names)
+      return unless entry
+
+      schema = TypeMapper.scalar(entry[:type], config)
+      schema[:enum] = entry[:enum].dup if entry[:enum]
+      schema[:pattern] = entry[:pattern] if entry[:pattern]
+      schema
+    end
+
     # Merges path parameters with explicit parameters, avoiding duplicates.
+    #
+    # - An explicit `in: path` entry replaces the generated one of the same name.
+    # - An explicit non-path parameter named like a path param on the same route is dropped
+    #   (it would shadow the path value in clients, such as MCP tool inputs).
     #
     # @param path_params [Array<Hash>] path parameters
     # @param explicit_params [Array<Hash>] explicitly documented parameters
     # @return [Array<Hash>] merged array of parameters
     def self.merge_parameters(path_params, explicit_params)
-      all_params = path_params + explicit_params
+      path_names = path_params.map { |param| param[:name].to_s }
+      explicit_paths = explicit_params.select { |param| parameter_field(param, :in).to_s == "path" }
+      # Path params are always required in OpenAPI.
+      overrides = explicit_paths.to_h do |param|
+        [ parameter_field(param, :name).to_s, param.to_h.symbolize_keys.merge(required: true) ]
+      end
+      generated = path_params.map { |param| overrides[param[:name].to_s] || param }
+      others = explicit_params.reject do |param|
+        location = parameter_field(param, :in).to_s
+        location != "path" && path_names.include?(parameter_field(param, :name).to_s)
+      end
       seen = {}
 
-      all_params.select do |param|
-        name = parameter_field(param, :name)
-        location = parameter_field(param, :in)
-        key = "#{location}:#{name}"
+      (generated + others).select do |param|
+        key = "#{parameter_field(param, :in)}:#{parameter_field(param, :name)}"
 
         next false if seen[key]
         seen[key] = true

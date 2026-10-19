@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Add `api_path_param name, type = :string, within: [], enum: nil, pattern: nil` (class attribute
+  `open_api_generator_path_params`, inherited, merge-stored). Types are `:uuid` (through
+  `scalar_overrides`), `:string` and `:integer`; anything else raises. `within:` scopes a
+  declaration to routes that also have the named path params (`/cards/{id}` vs
+  `/boards/{board_id}/cards/{id}`); the most specific match wins and equal specificity raises.
+  Undeclared path params stay `{ type: string }`.
+- Parameter merge precedence: an explicit non-path parameter that shares a name with a path
+  param on the same route is dropped (it used to shadow the path param in clients), and an
+  explicit `in: path` swagger parameter replaces the generated one.
+- Add `Completeness.undeclared_path_params(config:, include_ignored:)` for routed `id` and
+  `*_id` path params with no declaration and no explicit `in: path` parameter, and
+  `SpecBuilder.path_param_declared?`. Host tests assert the list is empty.
 - DSL class attributes (`open_api_generator_*`) no longer define instance readers, and
   `permitted` is private, so none of them is a routable controller action. Call `permitted` from
   inside the controller (implicit receiver); tests use `controller.send(:permitted, ...)`.
