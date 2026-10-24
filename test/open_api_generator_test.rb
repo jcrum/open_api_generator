@@ -302,6 +302,18 @@ class OpenApiGeneratorInputSpecTest < ActiveSupport::TestCase
     assert_equal [ "title" ], spec.schema[:required]
   end
 
+  test "documents maxItems on named array fields" do
+    spec = OpenApiGenerator::InputSpec.new(
+      action: :create,
+      permit: { tags: [ :string ], rows: [ [ name: :string ] ], other: [ :string ] },
+      max_items: { tags: 3, rows: 5 }
+    )
+
+    assert_equal 3, spec.schema[:properties]["tags"][:maxItems]
+    assert_equal 5, spec.schema[:properties]["rows"][:maxItems]
+    assert_nil spec.schema[:properties]["other"][:maxItems]
+  end
+
   test "raises parameter missing when the wrapper key is not an object" do
     spec = OpenApiGenerator::InputSpec.new(action: :create, wrapped_in: :user, permit: { name: :string })
 

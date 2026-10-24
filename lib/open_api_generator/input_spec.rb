@@ -2,7 +2,7 @@
 
 module OpenApiGenerator
   class InputSpec
-    Field = Struct.new(:name, :type, :array, :required, :children, :array_children, keyword_init: true) do
+    Field = Struct.new(:name, :type, :array, :required, :children, :array_children, :max_items, keyword_init: true) do
       def array?
         array
       end
@@ -18,7 +18,8 @@ module OpenApiGenerator
 
     attr_reader :action, :wrapped_in, :model, :fields
 
-    def initialize(action:, permit:, wrapped_in: nil, model: nil)
+    def initialize(action:, permit:, wrapped_in: nil, model: nil, max_items: nil)
+      @max_items = (max_items || {}).transform_keys(&:to_s)
       @action = action.to_s
       @wrapped_in = wrapped_in
       @model = model
@@ -77,14 +78,14 @@ module OpenApiGenerator
         inner = token.first
         if inner.is_a?(Array) && inner.length == 1 && inner.first.is_a?(Hash)
           children = inner.first
-          Field.new(name: name, type: :object, array: true, required: required, children: nil,
+          Field.new(name: name, type: :object, array: true, required: required, children: nil, max_items: @max_items[name],
             array_children: children.map { |child_name, child_token| parse(child_name, child_token) })
         elsif inner.is_a?(Hash)
-          Field.new(name: name, type: :object, array: true, required: required, children: nil,
+          Field.new(name: name, type: :object, array: true, required: required, children: nil, max_items: @max_items[name],
             array_children: inner.map { |child_name, child_token| parse(child_name, child_token) })
         else
           value = inner.to_s
-          Field.new(name: name, type: value.chomp("!").to_sym, array: true, required: required || value.end_with?("!"), children: nil, array_children: nil)
+          Field.new(name: name, type: value.chomp("!").to_sym, array: true, required: required || value.end_with?("!"), children: nil, array_children: nil, max_items: @max_items[name])
         end
       else
         value = token.to_s
@@ -126,14 +127,19 @@ module OpenApiGenerator
 
     def field_schema(field, config)
       if field.array_object?
-        { type: "array", items: object_schema(field.array_children, config) }
+        with_max_items({ type: "array", items: object_schema(field.array_children, config) }, field)
       elsif field.object?
         object_schema(field.children, config)
       elsif field.array?
-        TypeMapper.array(field.type, config)
+        with_max_items(TypeMapper.array(field.type, config), field)
       else
         column_or_scalar(field, config)
       end
+    end
+
+    def with_max_items(schema, field)
+      schema[:maxItems] = field.max_items if field.max_items
+      schema
     end
 
     def column_or_scalar(field, config)

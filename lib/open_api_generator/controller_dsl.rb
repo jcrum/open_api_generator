@@ -79,12 +79,16 @@ module OpenApiGenerator
         self.open_api_generator_response_specs = open_api_generator_response_specs.merge(action.to_s => response)
       end
 
-      def api_params(action, permit:, wrapped_in: nil, model: nil)
+      # @param max_items [Hash{Symbol=>Integer}, nil] documents `maxItems` on the named array
+      #   fields (`max_items: { targets: 50 }`). Schema only: the service or model must
+      #   still enforce the limit.
+      def api_params(action, permit:, wrapped_in: nil, model: nil, max_items: nil)
         spec = OpenApiGenerator::InputSpec.new(
           action: action,
           permit: permit,
           wrapped_in: wrapped_in,
-          model: model
+          model: model,
+          max_items: max_items
         )
         self.open_api_generator_input_specs = open_api_generator_input_specs.merge(action.to_s => spec)
       end
