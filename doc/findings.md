@@ -18,3 +18,8 @@ Command from this project: `env -u DATABASE_URL GEM_HOME=/private/tmp/paxfish-ag
 ## 2026-10-28 Focused regression verification
 
 User-authorized focused execution results, exact scope, setup-only corrections and environment limits are recorded in the [workspace runtime report](../../../_doc/refactoring/runtime-verification.md). Earlier source-phase statements that tests were unrun are historical. This is targeted coverage, not a full-suite or Gates3/4 production-readiness claim.
+
+
+## 2026-10-28 Revised refactoring closure
+
+OAG-REF-004 private unused helper cleanup is complete. Public scaffold constants/layout/stylesheet remain intentional compatibility contracts; removal is deferred pending external-consumer/versioning evidence and approval.
