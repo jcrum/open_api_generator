@@ -18,14 +18,7 @@ module OpenApiGenerator
       registry = SchemaRegistry.new
 
       paths = {}
-      routes.each do |route|
-        controller_class = constantize_controller(route.controller)
-        next unless controller_class
-        next if config.ignored_controllers.include?(controller_class.name)
-        next unless include_controller?(controller_class, config)
-        next if ignore_action?(controller_class, route.action)
-
-        oas_path = convert_path_to_open_api(route.path)
+      eligible_routes(routes, config).each do |route, controller_class, oas_path|
         verb = route.verb.downcase
 
         paths[oas_path] ||= {}
@@ -54,25 +47,37 @@ module OpenApiGenerator
     # OpenAPI document so completeness checks can run without duplicating route
     # filtering logic.
     def self.discover_operations(config, include_ignored: false)
-      RouteDiscovery.call(config: config).filter_map do |route|
-        controller_class = constantize_controller(route.controller)
-        next unless controller_class
-        next if config.ignored_controllers.include?(controller_class.name)
-        next unless include_controller?(controller_class, config, include_ignored: include_ignored)
-        next if ignore_action?(controller_class, route.action)
-
+      routes = RouteDiscovery.call(config: config)
+      eligible_routes(routes, config, include_ignored: include_ignored).map do |route, controller_class, oas_path|
         docs = get_action_docs(controller_class, route.action)
         {
           controller: controller_class.name,
           action: route.action,
           verb: route.verb,
-          path: convert_path_to_open_api(route.path),
+          path: oas_path,
           controller_class: controller_class,
           docs: docs,
           has_request_body: request_body_declared?(controller_class, route.action, docs)
         }
       end
     end
+
+    # Enumerates the common route-eligibility decision without retaining reloadable
+    # controller classes. Only completeness callers opt into hidden controllers.
+    def self.eligible_routes(routes, config, include_ignored: false)
+      return enum_for(__method__, routes, config, include_ignored: include_ignored) unless block_given?
+
+      routes.each do |route|
+        controller_class = constantize_controller(route.controller)
+        next unless controller_class
+        next if config.ignored_controllers.include?(controller_class.name)
+        next unless include_controller?(controller_class, config, include_ignored: include_ignored)
+        next if ignore_action?(controller_class, route.action)
+
+        yield route, controller_class, convert_path_to_open_api(route.path)
+      end
+    end
+    private_class_method :eligible_routes
 
     # Converts a controller path string to a controller class.
     #
@@ -167,14 +172,7 @@ module OpenApiGenerator
     end
 
     def self.build_route_introspection(routes, config)
-      routes.filter_map do |route|
-        controller_class = constantize_controller(route.controller)
-        next unless controller_class
-        next if config.ignored_controllers.include?(controller_class.name)
-        next unless include_controller?(controller_class, config)
-        next if ignore_action?(controller_class, route.action)
-
-        oas_path = convert_path_to_open_api(route.path)
+      eligible_routes(routes, config).map do |route, controller_class, oas_path|
         docs = get_action_docs(controller_class, route.action)
         params = summarize_parameters(oas_path, docs, controller_class, config)
 
@@ -427,21 +425,6 @@ module OpenApiGenerator
         seen[key] = true
         true
       end
-    end
-
-    # Builds the responses object for an operation.
-    #
-    # @param config [Configuration] the configuration object
-    # @param docs [Hash] the action documentation
-    # @return [Hash] hash of response objects keyed by status code
-    def self.build_responses(config, docs)
-      return docs[:responses] if docs[:responses]
-
-      {
-        "200" => {
-          description: config.default_response_description
-        }
-      }
     end
 
     # Converts a Rails path pattern to OpenAPI format.

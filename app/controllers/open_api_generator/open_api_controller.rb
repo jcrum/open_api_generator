@@ -48,26 +48,18 @@ module OpenApiGenerator
     # @return [Hash] the OpenAPI specification
     def spec
       cfg = OpenApiGenerator.config
-
-      if cfg.cache_enabled
-        Rails.cache.fetch(cfg.cache_key, expires_in: cfg.cache_ttl, race_condition_ttl: RACE_CONDITION_TTL) do
-          OpenApiGenerator::SpecBuilder.call(config: cfg)
-        end
-      else
-        OpenApiGenerator::SpecBuilder.call(config: cfg)
-      end
+      with_cache(cfg, key: -> { cfg.cache_key }) { OpenApiGenerator::SpecBuilder.call(config: cfg) }
     end
 
     def route_introspection
       cfg = OpenApiGenerator.config
+      with_cache(cfg, key: -> { "#{cfg.cache_key}/routes" }) { OpenApiGenerator::SpecBuilder.route_introspection(config: cfg) }
+    end
 
-      if cfg.cache_enabled
-        Rails.cache.fetch("#{cfg.cache_key}/routes", expires_in: cfg.cache_ttl, race_condition_ttl: RACE_CONDITION_TTL) do
-          OpenApiGenerator::SpecBuilder.route_introspection(config: cfg)
-        end
-      else
-        OpenApiGenerator::SpecBuilder.route_introspection(config: cfg)
-      end
+    def with_cache(config, key:)
+      return yield unless config.cache_enabled
+
+      Rails.cache.fetch(key.call, expires_in: config.cache_ttl, race_condition_ttl: RACE_CONDITION_TTL) { yield }
     end
   end
 end
