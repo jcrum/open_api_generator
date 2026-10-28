@@ -76,11 +76,11 @@ class RouteEligibilityTest < ActiveSupport::TestCase
       audited = OpenApiGenerator::Completeness.audit(config: @config, include_ignored: true)
       assert_equal [ "/hidden" ], audited.map(&:path)
       assert_empty OpenApiGenerator::Completeness.audit(config: @config)
-      spec, introspection, discovered = outputs
-      refute spec[:paths].key?("/hidden")
-      refute_includes introspection.map { |entry| entry[:open_api_path] }, "/hidden"
-      refute_includes discovered.map { |entry| entry[:path] }, "/hidden"
     end
+    spec, introspection, discovered = outputs
+    refute spec[:paths].key?("/hidden")
+    refute_includes introspection.map { |entry| entry[:open_api_path] }, "/hidden"
+    refute_includes discovered.map { |entry| entry[:path] }, "/hidden"
   end
 
   test "eligibility resolves current configuration on each call" do
